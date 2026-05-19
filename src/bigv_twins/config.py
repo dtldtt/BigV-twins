@@ -40,19 +40,32 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
+    # Data sources
     zhihu_db_path: Path = Path("/home/dtl/projects/zhihu/data/zhihu.db")
     twins_dir: Path = Path("/home/dtl/projects/BigV-twins/twins")
     personas_dir: Path = Path("/home/dtl/projects/BigV-twins/personas")
 
+    # Embedding
     embedding_model: str = "BAAI/bge-base-zh-v1.5"
     embedding_dim: int = 768
-
     chunk_size: int = 600
     chunk_overlap: int = 80
 
+    # MCP server
     mcp_host: str = "127.0.0.1"
     mcp_port: int = 8770
 
+    # Web chat app
+    web_host: str = "127.0.0.1"
+    web_port: int = 8001
+    web_secret_key: str = ""   # required; deploy.sh generates one if missing
+
+    # OpenClaw gateway (for chat agent calls; token auto-read from openclaw.json)
+    openclaw_base_url: str = "http://127.0.0.1:18789"
+    openclaw_config_path: Path = Path.home() / ".openclaw" / "openclaw.json"
+    openclaw_agent_timeout_s: int = 180   # /v1/chat/completions can be slow
+
+    # Optional one-shot persona generation (when openclaw is unavailable)
     anthropic_api_key: str = ""
 
     def twin_db_path(self, slug: str) -> Path:
@@ -60,6 +73,10 @@ class Settings(BaseSettings):
 
     def persona_path(self, slug: str) -> Path:
         return self.personas_dir / f"{slug}.md"
+
+    @property
+    def chats_db_path(self) -> Path:
+        return self.twins_dir.parent / "chats.db"
 
 
 settings = Settings()

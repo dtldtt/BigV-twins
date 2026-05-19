@@ -21,6 +21,7 @@
 - [11. 迁移到新机器](#11-迁移到新机器)
 - [12. 故障排查](#12-故障排查)
 - [13. 文件清单](#13-文件清单)
+- [14. 赛博大V Web UI（可选）](#14-赛博大v-web-ui可选)
 
 ---
 
@@ -122,7 +123,12 @@ BigV-twins/
 │   ├── embed.py                    (sentence-transformers + BGE 封装)
 │   ├── index.py                    (增量索引器；CLI: python -m bigv_twins.index)
 │   ├── search.py                   (sqlite-vec 检索；CLI: python -m bigv_twins.search)
-│   └── server.py                   (FastMCP server；CLI: python -m bigv_twins.server)
+│   ├── server.py                   (FastMCP server；CLI: python -m bigv_twins.server)
+│   └── web/                        ← 赛博大V Web UI（FastAPI；见 §14）
+│       ├── app.py / db.py / auth.py / auth_routes.py / invites.py
+│       ├── chat.py / admin.py / openclaw_client.py / bootstrap.py
+│       ├── templates/{base,login,register,placeholder,chat/*,admin/*}.html
+│       └── static/{style.css, chat.js}
 │
 ├── scripts/
 │   ├── generate_personas.py        ← 一次性 persona 生成（读 openclaw.json 自动调配的 provider）
@@ -133,6 +139,7 @@ BigV-twins/
 │   ├── bigv-twins-server.service   (MCP server 常驻)
 │   ├── bigv-twins-daily.service    (每日增量任务)
 │   ├── bigv-twins-daily.timer      (定时器：每天 03:17 + 抖动)
+│   ├── bigv-twins-web.service      (web chat UI 常驻；见 §14)
 │   └── install_systemd.sh          (复制到 ~/.config/systemd/user/ 并 enable)
 │
 ├── skills/                         ← 「真相」：4 个 OpenClaw Skill 的源
@@ -155,10 +162,13 @@ BigV-twins/
 │   └── shen.db           (~300 MB 全量)
 │   ⚠ 默认 gitignore；迁移时可单独 rsync 节省重建时间
 │
-└── logs/                           ← 索引器 + MCP server 日志（gitignored）
-    ├── bootstrap.log
-    ├── mcp_server.log
-    └── daily_index.log
+├── logs/                           ← 索引器 + MCP server + web 日志（gitignored）
+│   ├── bootstrap.log
+│   ├── mcp_server.log
+│   ├── daily_index.log
+│   └── web.log
+│
+└── chats.db                        ← 仅当启用 web UI 时存在（用户 / 邀请 / 对话；gitignored）
 ```
 
 ### 部署后的「副本」（不在项目里）
@@ -632,6 +642,113 @@ python -c "from sentence_transformers import SentenceTransformer; SentenceTransf
 
 ---
 
+## 14. 赛博大V Web UI（可选）
+
+如果想给受邀请的用户提供一个浏览器聊天界面（独立于 OpenClaw 的微信/Telegram 通道），开启 web UI。**不是必需的**——你完全可以只用 MCP + agent CLI / IM。
+
+### 14.1 它是什么
+
+一个独立的 FastAPI 应用监听 `127.0.0.1:8001`，提供：
+
+- **登录 / 注册**（注册需邀请码；admin 在管理后台轮换邀请码）
+- **博主 tab 列表**（自动过滤被 admin 隐藏的博主）
+- **对话历史**（按博主分组，每个博主独立线程）
+- **SSE 流式回复**（实时字符级吐字，比一次性返回好得多）
+- **管理后台**（仅 admin）：仪表盘、邀请码管理、用户管理、博主显示控制、对话清理
+
+数据存在项目根目录的 `chats.db`（独立于 `twins/*.db`，互不干扰）。
+
+### 14.2 架构
+
+```
+浏览器 ←─SSE─ FastAPI :8001 ──HTTP──→ OpenClaw /v1/chat/completions :18789
+                  │                              │
+                  ▼                              ▼ (agent loop)
+              chats.db (sqlite)              bigv-{slug} skill
+              users / invites /                    │
+              conversations / messages             ▼
+                                            bigv-twins MCP :8770 (你已有的)
+```
+
+web app **不直接调** MCP server——它调 OpenClaw 的 `/v1/chat/completions`，让 OpenClaw 的 agent 触发对应 skill 后再去调 MCP。
+
+### 14.3 部署
+
+`./deploy.sh` 默认会一并部署（除非加 `--skip-web`）：
+
+- 在 `.env` 里生成一个 32-byte `WEB_SECRET_KEY`（用于 cookie 签名）
+- 启用 OpenClaw `/v1/chat/completions` 端点（写入 `~/.openclaw/openclaw.json`）+ 把 `agents.defaults.timeoutSeconds` 调到 180s
+- 安装 `bigv-twins-web.service` user systemd unit
+- 提示创建首个 admin 用户（用 `BIGV_ADMIN_USERNAME` / `BIGV_ADMIN_PASSWORD` 环境变量预设，或部署后手动跑 `python -m bigv_twins.web.bootstrap`）
+
+> ⚠️ 首次启用 web 会触发 OpenClaw gateway 重启（~10s 不可用）。
+
+### 14.4 创建首个 admin
+
+```bash
+conda activate bigv-twins && cd /path/to/BigV-twins
+python -m bigv_twins.web.bootstrap        # 交互式：会要求 username + password（getpass）
+# 或非交互：
+BIGV_ADMIN_USERNAME=alice BIGV_ADMIN_PASSWORD=supersecret123 python -m bigv_twins.web.bootstrap
+```
+
+只能 bootstrap 一次（之后 admin 已存在会拒绝）。
+
+### 14.5 给受邀请的人开账号
+
+1. admin 登录 → 顶部 nav "管理" → "邀请码" → "生成新邀请码（作废旧的）"
+2. 复制邀请码，发给朋友
+3. 朋友访问 `/register`，填用户名 / 密码 / 邀请码 → 自动登录
+
+⚠️ 同一时间只允许一个 active 邀请码。生成新的会作废旧的。已用旧码注册的账号**不受影响**。
+
+### 14.6 把入口挂到你的 zhihu 站点
+
+在 zhihu 项目的导航模板里加一行：
+
+```html
+<a href="http://你的域名:8001/" target="_blank">赛博大V</a>
+```
+
+仅此而已——chat 应用完全独立（独立 cookie / 独立数据库 / 独立账号体系）。
+
+### 14.7 admin 能做的事
+
+| 功能 | 在哪 |
+|---|---|
+| 看用户数 / 对话数 / 消息数 / token 用量 | `/admin` 仪表盘 |
+| 轮换邀请码（旧码立即作废） | `/admin/invites` |
+| 看每个用户的活跃度 + 删除非 admin 用户 | `/admin/users` |
+| 隐藏 / 显示博主（前端立即生效，隐藏后历史也访问不到） | `/admin/bloggers` |
+| 批量删除 N 天前未更新的对话 | `/admin/cleanup` |
+
+### 14.8 故障排查
+
+| 现象 | 排查 |
+|---|---|
+| `/login` 502/不响应 | `systemctl --user status bigv-twins-web` · `journalctl --user -u bigv-twins-web -n 100` |
+| 发问后 `⚠ ...timeout` | OpenClaw `/v1/chat/completions` 没启用或 timeout 太短。看 `~/.openclaw/openclaw.json` 是否有 `gateway.http.endpoints.chatCompletions.enabled=true` 和 `agents.defaults.timeoutSeconds>=180` |
+| 发问后立刻 `⚠ openclaw 401` | gateway token 变了。`tail ~/.openclaw/openclaw.json` 看新 token，web app 启动时缓存的会失效，restart `bigv-twins-web` |
+| 注册失败"邀请码无效" | admin 是否已轮换 / 已生成；`select * from invites where deactivated_at is null` 看 active 那条 |
+
+### 14.9 关掉 web
+
+```bash
+systemctl --user disable --now bigv-twins-web.service
+# (可选) 把 openclaw 的 chatCompletions 端点关回去
+python3 -c "
+import json, pathlib
+p = pathlib.Path.home() / '.openclaw' / 'openclaw.json'
+d = json.loads(p.read_text())
+d.get('gateway',{}).pop('http', None)
+p.write_text(json.dumps(d, indent=2, ensure_ascii=False))
+"
+```
+
+`chats.db` 保留——下次启用还能继续。
+
+---
+
 ## License
 
-私有项目，自用。BGE-base-zh-v1.5 (MIT) by BAAI；OpenClaw (商业)；FastMCP (MIT)。
+私有项目，自用。BGE-base-zh-v1.5 (MIT) by BAAI；OpenClaw (商业)；FastMCP (MIT)；FastAPI (MIT)；Pico CSS (MIT)。

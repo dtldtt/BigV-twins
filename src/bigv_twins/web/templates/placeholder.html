@@ -1,0 +1,10 @@
+{% extends "base.html" %}
+{% block title %}赛博大V{% endblock %}
+
+{% block content %}
+<article>
+  <header><h2>👋 你好, {{ user.username }}</h2></header>
+  <p>登录成功。聊天界面（Chunk 2）马上来。</p>
+  <p class="muted">当前角色: <code>{{ user.role }}</code></p>
+</article>
+{% endblock %}

@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}清理 · 管理{% endblock %}
+
+{% block content %}
+<nav><ul>
+  <li><strong>管理</strong></li>
+  <li><a href="/admin">仪表盘</a></li>
+  <li><a href="/admin/invites">邀请码</a></li>
+  <li><a href="/admin/users">用户</a></li>
+  <li><a href="/admin/bloggers">博主显示</a></li>
+  <li><a href="/admin/cleanup" aria-current="page">清理</a></li>
+</ul></nav>
+
+<h2>对话清理</h2>
+<p class="muted">删除超过指定天数没有更新的对话。删除是级联的（消息也会一起删）。<strong>不可恢复</strong>。</p>
+
+<h3>会影响多少？</h3>
+<table>
+  <thead><tr><th>超过</th><th>受影响对话数</th></tr></thead>
+  <tbody>
+    {% for p in presets %}
+      <tr><td>{{ p.days }} 天</td><td>{{ p.count }}</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<article>
+  <header>执行清理</header>
+  <form method="post" action="/admin/cleanup"
+        onsubmit="return confirm('确定执行？此操作不可恢复');">
+    <label>删除超过多少天未更新的对话
+      <input type="number" name="older_than_days" min="1" value="90" required>
+    </label>
+    <label>范围
+      <select name="scope">
+        <option value="all" selected>所有用户的对话</option>
+        <option value="self">只清理我的</option>
+      </select>
+    </label>
+    <button type="submit" class="secondary">🧹 执行清理</button>
+  </form>
+</article>
+{% endblock %}

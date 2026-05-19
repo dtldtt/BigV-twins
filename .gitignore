@@ -14,6 +14,12 @@ dist/
 # Created on demand by `python -m bigv_twins.index` (or deploy.sh).
 twins/
 
+# Web chat app: users / password hashes / conversations.
+# Generated at runtime; do NOT commit (contains secrets + private data).
+chats.db
+chats.db-shm
+chats.db-wal
+
 # Runtime logs
 logs/
 

@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}登录 · 赛博大V{% endblock %}
+
+{% block content %}
+<article style="max-width:420px;margin:4rem auto">
+  <header><h2 style="margin:0">登录</h2></header>
+  {% if error %}<p style="color:var(--pico-color-red-500)">⚠ {{ error }}</p>{% endif %}
+  <form method="post" action="/login">
+    <label>用户名
+      <input type="text" name="username" value="{{ username }}" required autofocus>
+    </label>
+    <label>密码
+      <input type="password" name="password" required>
+    </label>
+    <button type="submit">登录</button>
+  </form>
+  <footer class="muted">没账户？<a href="/register">用邀请码注册</a></footer>
+</article>
+{% endblock %}

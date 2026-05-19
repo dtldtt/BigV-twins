@@ -4,9 +4,13 @@
 # Usage:
 #   ./deploy.sh --zhihu-db /path/to/zhihu.db
 #     [--conda-env bigv-twins]
-#     [--mcp-port 8770]
-#     [--skip-index] [--skip-personas] [--skip-systemd] [--skip-openclaw]
+#     [--mcp-port 8770] [--web-port 8001]
+#     [--skip-index] [--skip-personas] [--skip-systemd]
+#     [--skip-openclaw] [--skip-web]
 #     [--force-personas]
+#
+# Optional env vars (for non-interactive admin bootstrap):
+#     BIGV_ADMIN_USERNAME / BIGV_ADMIN_PASSWORD
 #
 # Each step is idempotent. Re-run after editing source / config and it does
 # the right thing. See README.md §6 for what each step does.
@@ -18,16 +22,18 @@ set -euo pipefail
 ZHIHU_DB=""
 CONDA_ENV="bigv-twins"
 MCP_PORT="8770"
+WEB_PORT="8001"
 SKIP_INDEX="false"
 SKIP_PERSONAS="false"
 SKIP_SYSTEMD="false"
 SKIP_OPENCLAW="false"
+SKIP_WEB="false"
 FORCE_PERSONAS="false"
 
 # ---------------------------------------------------------------- arg parse
 
 usage() {
-    sed -n '2,12p' "$0" | sed 's/^# \?//'
+    sed -n '2,16p' "$0" | sed 's/^# \?//'
     exit "${1:-0}"
 }
 
@@ -36,10 +42,12 @@ while [[ $# -gt 0 ]]; do
         --zhihu-db)        ZHIHU_DB="$2"; shift 2 ;;
         --conda-env)       CONDA_ENV="$2"; shift 2 ;;
         --mcp-port)        MCP_PORT="$2"; shift 2 ;;
+        --web-port)        WEB_PORT="$2"; shift 2 ;;
         --skip-index)      SKIP_INDEX="true"; shift ;;
         --skip-personas)   SKIP_PERSONAS="true"; shift ;;
         --skip-systemd)    SKIP_SYSTEMD="true"; shift ;;
         --skip-openclaw)   SKIP_OPENCLAW="true"; shift ;;
+        --skip-web)        SKIP_WEB="true"; shift ;;
         --force-personas)  FORCE_PERSONAS="true"; shift ;;
         -h|--help)         usage 0 ;;
         *) echo "unknown arg: $1" >&2; usage 1 ;;
@@ -51,7 +59,6 @@ done
 PROJ_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$PROJ_DIR"
 
-# Locate openclaw binary (PATH first, then nvm-style fallback).
 find_openclaw() {
     if command -v openclaw >/dev/null 2>&1; then
         command -v openclaw
@@ -66,6 +73,7 @@ find_openclaw() {
 }
 
 OPENCLAW_BIN="$(find_openclaw 2>/dev/null || true)"
+OPENCLAW_CFG="$HOME/.openclaw/openclaw.json"
 
 log()  { printf '\n\033[1;36m==>\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[!]\033[0m %s\n' "$*" >&2; }
@@ -74,7 +82,7 @@ err()  { printf '\033[1;31m[x]\033[0m %s\n' "$*" >&2; }
 # ---------------------------------------------------------------- step 1
 
 check_prereqs() {
-    log "[1/11] checking prerequisites"
+    log "[1/13] checking prerequisites"
 
     if ! command -v conda >/dev/null 2>&1; then
         err "conda not found on PATH. Install miniconda first: https://docs.conda.io"
@@ -109,11 +117,9 @@ check_prereqs() {
 # ---------------------------------------------------------------- step 2
 
 ensure_conda_env() {
-    log "[2/11] ensure conda env: $CONDA_ENV"
-
+    log "[2/13] ensure conda env: $CONDA_ENV"
     # shellcheck source=/dev/null
     source "$(conda info --base)/etc/profile.d/conda.sh"
-
     if conda env list | awk '{print $1}' | grep -qx "$CONDA_ENV"; then
         echo "  env $CONDA_ENV already exists, skip create"
     else
@@ -127,15 +133,24 @@ ensure_conda_env() {
 # ---------------------------------------------------------------- step 3
 
 install_package() {
-    log "[3/11] pip install -e ."
-    pip install -e . 2>&1 | tail -2
-    python -c "import bigv_twins, mcp, sentence_transformers, sqlite_vec; print('  imports ok')"
+    log "[3/13] pip install -e ."
+    pip install -e . 2>&1 | tail -3
+    python -c "import bigv_twins, mcp, sentence_transformers, sqlite_vec, fastapi, sqlalchemy; print('  imports ok')"
 }
 
 # ---------------------------------------------------------------- step 4
 
 generate_env_file() {
-    log "[4/11] generating .env"
+    log "[4/13] generating .env"
+
+    local secret
+    if [[ -f .env ]] && grep -q '^WEB_SECRET_KEY=[^[:space:]]' .env; then
+        secret=$(grep '^WEB_SECRET_KEY=' .env | head -1 | cut -d= -f2-)
+        echo "  reusing existing WEB_SECRET_KEY (${#secret} chars)"
+    else
+        secret=$(openssl rand -hex 32)
+        echo "  generated new WEB_SECRET_KEY (${#secret} chars)"
+    fi
 
     if [[ -f .env ]]; then
         echo "  .env exists, backing up to .env.bak"
@@ -151,14 +166,18 @@ PERSONAS_DIR=$PROJ_DIR/personas
 
 EMBEDDING_MODEL=BAAI/bge-base-zh-v1.5
 EMBEDDING_DIM=768
-
 CHUNK_SIZE=600
 CHUNK_OVERLAP=80
 
 MCP_HOST=127.0.0.1
 MCP_PORT=$MCP_PORT
 
-# China-friendly Hugging Face mirror
+WEB_HOST=127.0.0.1
+WEB_PORT=$WEB_PORT
+WEB_SECRET_KEY=$secret
+
+OPENCLAW_BASE_URL=http://127.0.0.1:18789
+
 HF_ENDPOINT=https://hf-mirror.com
 
 # Only needed for one-shot persona generation if openclaw is unavailable.
@@ -170,8 +189,7 @@ EOF
 # ---------------------------------------------------------------- step 5
 
 pre_download_model() {
-    log "[5/11] pre-download embedding model (BGE-base-zh-v1.5)"
-
+    log "[5/13] pre-download embedding model (BGE-base-zh-v1.5)"
     python - <<'PY'
 from sentence_transformers import SentenceTransformer
 m = SentenceTransformer('BAAI/bge-base-zh-v1.5', device='cpu')
@@ -183,10 +201,10 @@ PY
 
 bootstrap_index() {
     if [[ "$SKIP_INDEX" == "true" ]]; then
-        log "[6/11] skip bootstrap index (--skip-index)"
+        log "[6/13] skip bootstrap index (--skip-index)"
         return
     fi
-    log "[6/11] bootstrap index (incremental — re-runs safe)"
+    log "[6/13] bootstrap index (incremental — re-runs safe)"
     echo "  this can take hours for large bloggers (shen ~5h). Press Ctrl-C to abort;"
     echo "  resume with: python -m bigv_twins.index"
     echo ""
@@ -197,11 +215,10 @@ bootstrap_index() {
 
 generate_personas() {
     if [[ "$SKIP_PERSONAS" == "true" ]]; then
-        log "[7/11] skip persona generation (--skip-personas or openclaw missing)"
+        log "[7/13] skip persona generation (--skip-personas or openclaw missing)"
         return
     fi
-
-    log "[7/11] generate personas via OpenClaw-configured provider"
+    log "[7/13] generate personas via OpenClaw-configured provider"
 
     local force_flag=""
     if [[ "$FORCE_PERSONAS" == "true" ]]; then
@@ -218,20 +235,28 @@ generate_personas() {
 
 install_systemd() {
     if [[ "$SKIP_SYSTEMD" == "true" ]]; then
-        log "[8/11] skip systemd install (--skip-systemd)"
+        log "[8/13] skip systemd install (--skip-systemd)"
         return
     fi
 
-    log "[8/11] install systemd user units"
+    log "[8/13] install systemd user units"
 
-    # Patch unit files to use this project's paths + python.
     local py_bin
     py_bin="$(conda info --base)/envs/$CONDA_ENV/bin/python"
     local unit_dir="$HOME/.config/systemd/user"
     mkdir -p "$unit_dir"
     mkdir -p "$PROJ_DIR/logs"
 
-    for unit in bigv-twins-server.service bigv-twins-daily.service bigv-twins-daily.timer; do
+    local units=(bigv-twins-server.service bigv-twins-daily.service bigv-twins-daily.timer)
+    if [[ "$SKIP_WEB" != "true" ]]; then
+        units+=(bigv-twins-web.service)
+    fi
+
+    for unit in "${units[@]}"; do
+        if [[ ! -f "systemd/$unit" ]]; then
+            warn "  missing systemd/$unit, skipping"
+            continue
+        fi
         sed -e "s|/home/dtl/projects/BigV-twins|$PROJ_DIR|g" \
             -e "s|/home/dtl/miniconda3/envs/bigv-twins/bin/python|$py_bin|g" \
             "systemd/$unit" > "$unit_dir/$unit"
@@ -249,41 +274,70 @@ install_systemd() {
     systemctl --user daemon-reload
     systemctl --user enable --now bigv-twins-server.service
     systemctl --user enable --now bigv-twins-daily.timer
+    if [[ "$SKIP_WEB" != "true" ]]; then
+        systemctl --user enable --now bigv-twins-web.service
+    fi
 
     sleep 3
-    echo
     systemctl --user status bigv-twins-server.service --no-pager | head -5 || true
+    if [[ "$SKIP_WEB" != "true" ]]; then
+        echo
+        systemctl --user status bigv-twins-web.service --no-pager | head -5 || true
+    fi
     echo
     systemctl --user list-timers --all --no-pager | grep -E "(NEXT|bigv)" || true
 }
 
 # ---------------------------------------------------------------- step 9
 
-register_mcp() {
-    if [[ "$SKIP_OPENCLAW" == "true" ]]; then
-        log "[9/11] skip openclaw mcp registration (--skip-openclaw or openclaw missing)"
+enable_openclaw_chat() {
+    if [[ "$SKIP_OPENCLAW" == "true" || "$SKIP_WEB" == "true" ]]; then
+        log "[9/13] skip openclaw /v1/chat/completions enable (web disabled)"
+        return
+    fi
+    if [[ ! -f "$OPENCLAW_CFG" ]]; then
+        warn "[9/13] $OPENCLAW_CFG missing — skip"
         return
     fi
 
-    log "[9/11] register MCP server with openclaw"
-    "$OPENCLAW_BIN" mcp set bigv-twins \
-        "{\"url\":\"http://127.0.0.1:$MCP_PORT/mcp\",\"transport\":\"streamable-http\"}" >/dev/null
-    echo "  registered. openclaw mcp list:"
-    "$OPENCLAW_BIN" mcp list 2>&1 | grep -E "(^-|bigv-twins)" | head -5
+    log "[9/13] enable openclaw /v1/chat/completions + bump agents.defaults.timeoutSeconds"
+    python3 - <<EOF
+import json, pathlib
+p = pathlib.Path("$OPENCLAW_CFG")
+d = json.loads(p.read_text())
+http = d.setdefault("gateway", {}).setdefault("http", {})
+http.setdefault("endpoints", {}).setdefault("chatCompletions", {})["enabled"] = True
+d.setdefault("agents", {}).setdefault("defaults", {})["timeoutSeconds"] = 180
+p.write_text(json.dumps(d, indent=2, ensure_ascii=False))
+print("  chatCompletions.enabled = true; agents.defaults.timeoutSeconds = 180")
+EOF
+    echo "  (openclaw gateway will hot-reload + restart in ~10s)"
 }
 
 # ---------------------------------------------------------------- step 10
 
-install_skills() {
+register_mcp() {
     if [[ "$SKIP_OPENCLAW" == "true" ]]; then
-        log "[10/11] skip skills copy (--skip-openclaw or openclaw missing)"
+        log "[10/13] skip openclaw mcp registration (--skip-openclaw or openclaw missing)"
         return
     fi
+    log "[10/13] register MCP server with openclaw"
+    "$OPENCLAW_BIN" mcp set bigv-twins \
+        "{\"url\":\"http://127.0.0.1:$MCP_PORT/mcp\",\"transport\":\"streamable-http\"}" >/dev/null
+    echo "  registered."
+    "$OPENCLAW_BIN" mcp list 2>&1 | grep -E "(^-|bigv-twins)" | head -5
+}
 
-    log "[10/11] copy skills to openclaw workspace"
+# ---------------------------------------------------------------- step 11
+
+install_skills() {
+    if [[ "$SKIP_OPENCLAW" == "true" ]]; then
+        log "[11/13] skip skills copy (--skip-openclaw or openclaw missing)"
+        return
+    fi
+    log "[11/13] copy skills to openclaw workspace"
     local workspace_skills="$HOME/.openclaw/workspace/skills"
     mkdir -p "$workspace_skills"
-
     for d in skills/bigv-*/; do
         [[ -d "$d" ]] || continue
         local name
@@ -292,19 +346,71 @@ install_skills() {
         cp -r "$d" "$workspace_skills/"
         echo "  copied $name"
     done
-
-    echo "  openclaw skills list | grep bigv:"
     "$OPENCLAW_BIN" skills list 2>&1 | grep -E "bigv-" | head -10 || true
 }
 
-# ---------------------------------------------------------------- step 11
+# ---------------------------------------------------------------- step 12
+
+bootstrap_web_admin() {
+    if [[ "$SKIP_WEB" == "true" ]]; then
+        log "[12/13] skip web admin bootstrap (--skip-web)"
+        return
+    fi
+    log "[12/13] web admin bootstrap (if no admin exists)"
+
+    local has_admin
+    has_admin="$(python - <<'PY' 2>/dev/null || echo n
+import asyncio, sqlite3
+from bigv_twins.config import settings
+try:
+    c = sqlite3.connect(settings.chats_db_path)
+    n = c.execute("SELECT count(*) FROM users WHERE role='admin'").fetchone()[0]
+    print("y" if n > 0 else "n")
+except Exception:
+    print("n")
+PY
+)"
+
+    if [[ "$has_admin" == "y" ]]; then
+        echo "  admin already exists, skip"
+        return
+    fi
+
+    if [[ -n "${BIGV_ADMIN_USERNAME:-}" && -n "${BIGV_ADMIN_PASSWORD:-}" ]]; then
+        echo "  using BIGV_ADMIN_USERNAME / _PASSWORD env vars"
+        python -m bigv_twins.web.bootstrap
+    else
+        warn "  no admin exists and BIGV_ADMIN_USERNAME/PASSWORD not set."
+        warn "  Create one manually:  python -m bigv_twins.web.bootstrap"
+    fi
+}
+
+# ---------------------------------------------------------------- step 13
 
 smoke_test() {
-    log "[11/11] smoke test MCP server"
-    if ! ss -tln 2>/dev/null | grep -q ":$MCP_PORT "; then
-        warn "port $MCP_PORT not listening; smoke test will likely fail"
+    log "[13/13] smoke tests"
+
+    if ss -tln 2>/dev/null | grep -q ":$MCP_PORT "; then
+        echo "  -- MCP server smoke --"
+        python scripts/test_mcp_client.py 2>&1 | tail -15 || warn "MCP smoke failed"
+    else
+        warn "  MCP port $MCP_PORT not listening; skip"
     fi
-    python scripts/test_mcp_client.py 2>&1 | tail -25 || warn "smoke test reported errors"
+
+    if [[ "$SKIP_WEB" != "true" ]]; then
+        if ss -tln 2>/dev/null | grep -q ":$WEB_PORT "; then
+            echo "  -- web app smoke --"
+            local code
+            code=$(curl -sS -o /dev/null -w "%{http_code}" -m 5 "http://127.0.0.1:$WEB_PORT/login" || echo "0")
+            if [[ "$code" == "200" ]]; then
+                echo "  /login → HTTP $code  ✓"
+            else
+                warn "  /login → HTTP $code (expected 200)"
+            fi
+        else
+            warn "  web port $WEB_PORT not listening; skip"
+        fi
+    fi
 }
 
 # ---------------------------------------------------------------- main
@@ -315,7 +421,8 @@ main() {
     echo "  zhihu db:    $ZHIHU_DB"
     echo "  conda env:   $CONDA_ENV"
     echo "  mcp port:    $MCP_PORT"
-    echo "  skip-index: $SKIP_INDEX  skip-personas: $SKIP_PERSONAS  skip-systemd: $SKIP_SYSTEMD  skip-openclaw: $SKIP_OPENCLAW"
+    echo "  web port:    $WEB_PORT  (skip=$SKIP_WEB)"
+    echo "  skips:       index=$SKIP_INDEX  personas=$SKIP_PERSONAS  systemd=$SKIP_SYSTEMD  openclaw=$SKIP_OPENCLAW"
 
     check_prereqs
     ensure_conda_env
@@ -325,20 +432,25 @@ main() {
     bootstrap_index
     generate_personas
     install_systemd
+    enable_openclaw_chat
     register_mcp
     install_skills
+    bootstrap_web_admin
     smoke_test
 
     log "DONE."
     echo
-    echo "Try it:"
-    echo "  $OPENCLAW_BIN agent --agent main -m \"MR Dang 怎么看 A 股市场？\""
+    echo "URLs:"
+    [[ "$SKIP_WEB" != "true" ]] && echo "  Web UI:  http://127.0.0.1:$WEB_PORT/  (赛博大V)"
+    echo "  MCP:     http://127.0.0.1:$MCP_PORT/mcp"
     echo
-    echo "Useful commands:"
-    echo "  systemctl --user status bigv-twins-server"
+    echo "Try the agent:"
+    [[ -n "$OPENCLAW_BIN" ]] && echo "  $OPENCLAW_BIN agent --agent main -m \"MR Dang 怎么看 A 股市场？\""
+    echo
+    echo "systemd:"
+    echo "  systemctl --user status bigv-twins-server bigv-twins-web"
     echo "  systemctl --user list-timers | grep bigv"
-    echo "  journalctl --user -u bigv-twins-server -f"
-    echo "  python -m bigv_twins.search --blogger eyu --query 'XX'"
+    echo "  journalctl --user -u bigv-twins-web -f"
 }
 
 main "$@"

@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}注册 · 赛博大V{% endblock %}
+
+{% block content %}
+<article style="max-width:480px;margin:4rem auto">
+  <header><h2 style="margin:0">注册</h2></header>
+  <p class="muted">需要邀请码。问 admin 要。</p>
+  {% if error %}<p style="color:var(--pico-color-red-500)">⚠ {{ error }}</p>{% endif %}
+  <form method="post" action="/register">
+    <label>用户名（3–32 字符 · 字母数字 / - _ .）
+      <input type="text" name="username" value="{{ username }}" required autofocus>
+    </label>
+    <label>密码（至少 8 位）
+      <input type="password" name="password" required>
+    </label>
+    <label>邀请码
+      <input type="text" name="invite" value="{{ invite }}" required>
+    </label>
+    <button type="submit">注册并登录</button>
+  </form>
+  <footer class="muted">已有账户？<a href="/login">登录</a></footer>
+</article>
+{% endblock %}

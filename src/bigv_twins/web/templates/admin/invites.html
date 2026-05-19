@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}邀请码 · 管理{% endblock %}
+
+{% block content %}
+<nav><ul>
+  <li><strong>管理</strong></li>
+  <li><a href="/admin">仪表盘</a></li>
+  <li><a href="/admin/invites" aria-current="page">邀请码</a></li>
+  <li><a href="/admin/users">用户</a></li>
+  <li><a href="/admin/bloggers">博主显示</a></li>
+  <li><a href="/admin/cleanup">清理</a></li>
+</ul></nav>
+
+<h2>邀请码</h2>
+<p class="muted">系统中同时只允许一个 active 邀请码。生成新的会自动作废旧的（已用旧码注册的账户不受影响）。</p>
+
+<form method="post" action="/admin/invites/rotate" style="margin-bottom:1.5rem"
+      onsubmit="return confirm('确定要生成新的邀请码吗？当前 active 邀请码会立即作废。');">
+  <button type="submit">+ 生成新邀请码（作废旧的）</button>
+</form>
+
+<table>
+  <thead>
+    <tr><th>状态</th><th>邀请码</th><th>生成于</th><th>失效于</th><th>用此码注册的人数</th></tr>
+  </thead>
+  <tbody>
+    {% for inv in invites %}
+      <tr>
+        <td>
+          {% if inv.deactivated_at is none %}
+            <strong style="color:var(--pico-color-green-500)">✓ active</strong>
+          {% else %}
+            <span class="muted">作废</span>
+          {% endif %}
+        </td>
+        <td><code style="font-size:0.85em;word-break:break-all">{{ inv.code }}</code></td>
+        <td><small>{{ inv.created_at.strftime("%Y-%m-%d %H:%M") }}</small></td>
+        <td><small>{% if inv.deactivated_at %}{{ inv.deactivated_at.strftime("%Y-%m-%d %H:%M") }}{% else %}—{% endif %}</small></td>
+        <td>{{ usage.get(inv.id, 0) }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="5" class="muted">还没生成过邀请码</td></tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

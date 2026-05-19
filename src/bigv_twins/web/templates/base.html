@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block title %}赛博大V{% endblock %}</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <nav class="container-fluid">
+    <ul>
+      <li><strong><a href="/" style="text-decoration:none">🤖 赛博大V</a></strong></li>
+    </ul>
+    <ul>
+      {% if user %}
+        <li><span class="muted">{{ user.username }}{% if user.role == "admin" %} · admin{% endif %}</span></li>
+        {% if user.role == "admin" %}<li><a href="/admin">管理</a></li>{% endif %}
+        <li>
+          <form method="post" action="/logout" style="display:inline">
+            <button type="submit" class="secondary outline" style="padding:0.3rem 0.8rem">退出</button>
+          </form>
+        </li>
+      {% endif %}
+    </ul>
+  </nav>
+
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>

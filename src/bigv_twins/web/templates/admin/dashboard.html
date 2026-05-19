@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}管理 · 赛博大V{% endblock %}
+
+{% block content %}
+<nav>
+  <ul>
+    <li><strong>管理</strong></li>
+    <li><a href="/admin">仪表盘</a></li>
+    <li><a href="/admin/invites">邀请码</a></li>
+    <li><a href="/admin/users">用户</a></li>
+    <li><a href="/admin/bloggers">博主显示</a></li>
+    <li><a href="/admin/cleanup">清理</a></li>
+  </ul>
+</nav>
+
+<h2>仪表盘</h2>
+<div class="grid">
+  <article><header>用户</header><h3>{{ counts.users }}</h3></article>
+  <article><header>对话</header><h3>{{ counts.conversations }}</h3></article>
+  <article><header>消息</header><h3>{{ counts.messages }}</h3></article>
+  <article><header>近 7 天消息</header><h3>{{ msgs_7d }}</h3></article>
+</div>
+
+<div class="grid">
+  <article>
+    <header>Token 用量（累计）</header>
+    <p>输入 <strong>{{ tok_in }}</strong> · 输出 <strong>{{ tok_out }}</strong></p>
+    <p class="muted"><small>注：当前 OpenClaw chat-completions 响应未带 usage，所以这里通常是 0。下一版若开 usage 字段会自动统计。</small></p>
+  </article>
+  <article>
+    <header>博主可见性</header>
+    <p>共 <strong>{{ blogger_total }}</strong> 位，已隐藏 <strong>{{ hidden_count }}</strong> 位</p>
+    <a href="/admin/bloggers" role="button" class="outline">管理</a>
+  </article>
+</div>
+
+<article>
+  <header>当前邀请码</header>
+  {% if active_invite %}
+    <p style="font-family:monospace;word-break:break-all">{{ active_invite.code }}</p>
+    <p class="muted"><small>生成于 {{ active_invite.created_at.strftime("%Y-%m-%d %H:%M") }}</small></p>
+  {% else %}
+    <p class="muted">（暂无可用邀请码）</p>
+  {% endif %}
+  <a href="/admin/invites" role="button">查看 / 轮换</a>
+</article>
+{% endblock %}

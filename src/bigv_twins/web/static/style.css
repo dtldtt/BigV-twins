@@ -1,0 +1,24 @@
+/* 赛博大V — minimal overrides on top of Pico CSS */
+
+:root {
+  --pico-font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+                      "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  --pico-spacing: 0.9rem;
+}
+
+body { padding-bottom: 2rem; }
+nav { border-bottom: 1px solid var(--pico-muted-border-color); }
+
+.muted { color: var(--pico-muted-color); font-size: 0.9rem; }
+
+/* Chat layout (Chunk 2 uses these) */
+.chat-layout { display: grid; grid-template-columns: 240px 1fr; gap: 1rem; min-height: 70vh; }
+.chat-sidebar { border-right: 1px solid var(--pico-muted-border-color); padding-right: 1rem; overflow-y: auto; }
+.chat-main { display: flex; flex-direction: column; min-height: 70vh; }
+.chat-messages { flex: 1; overflow-y: auto; padding-right: 0.5rem; }
+.chat-bubble { padding: 0.6rem 0.9rem; border-radius: 0.6rem; margin: 0.6rem 0; max-width: 85%; }
+.chat-bubble.user { background: var(--pico-primary-background); margin-left: auto; }
+.chat-bubble.assistant { background: var(--pico-card-background-color); border: 1px solid var(--pico-muted-border-color); }
+.chat-bubble pre { white-space: pre-wrap; word-wrap: break-word; }
+.chat-input { display: flex; gap: 0.5rem; padding-top: 0.6rem; border-top: 1px solid var(--pico-muted-border-color); }
+.chat-input textarea { flex: 1; min-height: 60px; resize: vertical; }

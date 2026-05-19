@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}赛博大V · 选择博主{% endblock %}
+
+{% block content %}
+<h2>选择一位博主开始对话</h2>
+<p class="muted">每位博主的回答严格基于其知乎归档内容，附原文链接。</p>
+
+<div class="grid">
+  {% for b in bloggers %}
+    <article>
+      <header>
+        <a href="/chat/{{ b.slug }}" style="text-decoration:none">
+          <strong>{{ b.name }}</strong>
+        </a>
+      </header>
+      <p class="muted">slug: <code>{{ b.slug }}</code></p>
+      <a href="/chat/{{ b.slug }}" role="button" class="outline" style="width:100%">进入</a>
+    </article>
+  {% endfor %}
+</div>
+
+{% if not bloggers %}
+  <p class="muted">（当前没有可对话的博主，admin 可能把它们都隐藏了）</p>
+{% endif %}
+
+{% if recent %}
+  <h3 style="margin-top:2rem">最近对话</h3>
+  <table>
+    <thead>
+      <tr><th>博主</th><th>标题</th><th>更新时间</th><th></th></tr>
+    </thead>
+    <tbody>
+      {% for c in recent %}
+        <tr>
+          <td><code>{{ c.blogger_slug }}</code></td>
+          <td>{{ c.title }}</td>
+          <td class="muted">{{ c.updated_at.strftime("%m-%d %H:%M") }}</td>
+          <td><a href="/chat/{{ c.blogger_slug }}/{{ c.id }}">打开</a></td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endif %}
+{% endblock %}

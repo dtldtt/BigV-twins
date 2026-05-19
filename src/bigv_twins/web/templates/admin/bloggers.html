@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}博主显示 · 管理{% endblock %}
+
+{% block content %}
+<nav><ul>
+  <li><strong>管理</strong></li>
+  <li><a href="/admin">仪表盘</a></li>
+  <li><a href="/admin/invites">邀请码</a></li>
+  <li><a href="/admin/users">用户</a></li>
+  <li><a href="/admin/bloggers" aria-current="page">博主显示</a></li>
+  <li><a href="/admin/cleanup">清理</a></li>
+</ul></nav>
+
+<h2>博主显示控制</h2>
+<p class="muted">隐藏的博主在 /chat 列表中不可见，对话页也会 404（包括历史对话）。底层索引和 MCP 工具不受影响——还在跑，只是前端用户访问不到。</p>
+
+<table>
+  <thead>
+    <tr><th>博主</th><th>slug</th><th>状态</th><th>隐藏于</th><th></th></tr>
+  </thead>
+  <tbody>
+    {% for r in rows %}
+      <tr>
+        <td>{{ r.blogger.name }}</td>
+        <td><code>{{ r.blogger.slug }}</code></td>
+        <td>
+          {% if r.hidden %}
+            <span style="color:var(--pico-color-red-500)">⛔ 已隐藏</span>
+          {% else %}
+            <span style="color:var(--pico-color-green-500)">✓ 显示</span>
+          {% endif %}
+        </td>
+        <td><small>{% if r.hidden_at %}{{ r.hidden_at.strftime("%Y-%m-%d %H:%M") }}{% else %}—{% endif %}</small></td>
+        <td>
+          <form method="post" action="/admin/bloggers/{{ r.blogger.slug }}/toggle" style="margin:0">
+            <button type="submit" class="outline" style="padding:0.2rem 0.7rem">
+              {% if r.hidden %}显示{% else %}隐藏{% endif %}
+            </button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}

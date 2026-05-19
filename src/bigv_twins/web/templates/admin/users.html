@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}用户 · 管理{% endblock %}
+
+{% block content %}
+<nav><ul>
+  <li><strong>管理</strong></li>
+  <li><a href="/admin">仪表盘</a></li>
+  <li><a href="/admin/invites">邀请码</a></li>
+  <li><a href="/admin/users" aria-current="page">用户</a></li>
+  <li><a href="/admin/bloggers">博主显示</a></li>
+  <li><a href="/admin/cleanup">清理</a></li>
+</ul></nav>
+
+<h2>用户 ({{ users|length }})</h2>
+<table>
+  <thead>
+    <tr>
+      <th>用户名</th><th>角色</th><th>注册时间</th><th>最近登录</th>
+      <th>对话数</th><th>tokens (in/out)</th><th></th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for u in users %}
+      <tr>
+        <td>{{ u.username }}{% if u.id == user.id %} <small class="muted">(你)</small>{% endif %}</td>
+        <td>{% if u.role == "admin" %}<strong>admin</strong>{% else %}user{% endif %}</td>
+        <td><small>{{ u.created_at.strftime("%Y-%m-%d") }}</small></td>
+        <td><small>{% if u.last_login_at %}{{ u.last_login_at.strftime("%m-%d %H:%M") }}{% else %}<span class="muted">—</span>{% endif %}</small></td>
+        <td>{{ conv_counts.get(u.id, 0) }}</td>
+        <td>
+          {% set t = tok_stats.get(u.id, (0,0)) %}
+          <small>{{ t[0] }} / {{ t[1] }}</small>
+        </td>
+        <td>
+          {% if u.id != user.id and u.role != "admin" %}
+            <form method="post" action="/admin/users/{{ u.id }}/delete" style="margin:0"
+                  onsubmit="return confirm('删除用户 {{ u.username }}？所有对话会被级联删除，不可恢复');">
+              <button type="submit" class="secondary outline" style="padding:0.2rem 0.6rem">删除</button>
+            </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endblock %}
