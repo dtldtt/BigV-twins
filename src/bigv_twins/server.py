@@ -17,6 +17,7 @@ from pydantic import Field
 from .chunk import html_to_text
 from .config import BLOGGERS, BY_SLUG, settings
 from .search import search as _search
+from .stock_data import get_stock_snapshot as _get_stock_snapshot
 
 log = logging.getLogger("bigv_twins.server")
 
@@ -28,7 +29,10 @@ mcp = FastMCP(
         "of a blogger's stance on a topic, `get_recent` for recent posts, and `get_post` "
         "to fetch the full cleaned text of a specific post by its zhihu_id. "
         "Use `get_persona` (or the persona://blogger/{slug} resource) for the blogger's "
-        "style summary."
+        "style summary. "
+        "Use `get_stock_snapshot` when the user asks about a specific stock — it "
+        "returns valuation / market cap / ownership / sector / index context, which "
+        "lets the blogger apply their quantitative framework to concrete numbers."
     ),
     host=settings.mcp_host,
     port=settings.mcp_port,
@@ -226,6 +230,35 @@ def get_persona(
         "available": True,
         "text": path.read_text(encoding="utf-8"),
     }
+
+
+@mcp.tool()
+def get_stock_snapshot(
+    query: Annotated[
+        str,
+        Field(description="股票代码 (如 600519/300750/688981/00700) 或常见股票名 (如 茅台/宁德时代/腾讯)"),
+    ],
+) -> dict:
+    """获取股票的基本面快照 + 大盘环境，用于辅助博主分析具体标的。
+
+    返回内容（best-effort，部分字段在某些股票上可能缺失）：
+    - resolved: 解析后的代码、名称、市场、板块（主板/创业板/科创板/北交所/港股）
+    - price: 现价 / 当日涨跌% / 52周高低 / 最近 1 年涨跌%
+    - valuation: PE_TTM / PB
+    - scale: 总市值（亿，显示形式如「1.93 万亿」）
+    - ownership: 控股性质（央企控股/省属国资控股/民营企业/外资企业...）+ 实际控制人
+    - business: 行业 + 主营业务文字描述
+    - company: 公司全名 / 董事长 / 员工数
+    - index_context: 上证指数最近 10 天；如果是创业板再附创业板指；科创板再附科创50
+
+    **务必**在用户问到具体股票/标的时**先**调用此工具拿到真实数字，
+    然后再调 search/get_persona——这样博主才能把自己的量化阈值
+    （如「市值 < 200 亿」「PE < 30」「央企控股」等）跟股票的真实数字逐条对照。
+
+    数据源（按可靠性）：Tencent 实时报价 → 同花顺主营业务 → 雪球控股结构 → 新浪 K 线。
+    缓存 10 分钟，重复查询同一股票不再请求外部 API。
+    """
+    return _get_stock_snapshot(query)
 
 
 @mcp.resource("persona://blogger/{slug}")
