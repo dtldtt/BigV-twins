@@ -1,0 +1,12 @@
+[Unit]
+Description=BigV-twins daily incremental index (reads zhihu.db, updates twins/*.db)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/dtl/projects/BigV-twins
+ExecStart=/home/dtl/miniconda3/envs/bigv-twins/bin/python -m bigv_twins.index
+StandardOutput=append:/home/dtl/projects/BigV-twins/logs/daily_index.log
+StandardError=append:/home/dtl/projects/BigV-twins/logs/daily_index.log
+Nice=10

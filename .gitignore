@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+build/
+dist/
+.venv/
+
+# Local config (contains secrets)
+.env
+.env.bak
+
+# Generated, big, regenerable: per-blogger vector indices.
+# Created on demand by `python -m bigv_twins.index` (or deploy.sh).
+twins/
+
+# Runtime logs
+logs/
+
+# OS
+.DS_Store
