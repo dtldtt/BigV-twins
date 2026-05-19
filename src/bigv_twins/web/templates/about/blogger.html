@@ -31,7 +31,7 @@
 </article>
 
 <details open style="margin-bottom:1rem">
-  <summary><strong>风格画像</strong>（由模型基于博主高赞内容自动总结）</summary>
+  <summary style="font-size:1.1rem; padding:0.5rem 0; cursor:pointer"><strong>风格画像</strong>（由模型基于博主高赞内容自动总结）</summary>
   {% if persona_text %}
     <div id="persona-content" data-raw="{{ persona_text }}"
          style="background:#fff;border:1px solid #e5e7eb;border-radius:6px;padding:1rem;margin-top:0.5rem">
@@ -42,8 +42,8 @@
   {% endif %}
 </details>
 
-<details>
-  <summary><strong>历史高赞 Top 5</strong></summary>
+<details open>
+  <summary style="font-size:1.1rem; padding:0.5rem 0; cursor:pointer"><strong>历史高赞 Top 5</strong></summary>
   <table style="margin-top:0.5rem">
     <thead>
       <tr><th>类型</th><th>标题 / 摘要</th><th>点赞</th><th>日期</th></tr>
@@ -63,8 +63,8 @@
   </table>
 </details>
 
-<details>
-  <summary><strong>最近 10 条</strong></summary>
+<details open>
+  <summary style="font-size:1.1rem; padding:0.5rem 0; cursor:pointer"><strong>最近 10 条</strong></summary>
   <table style="margin-top:0.5rem">
     <thead>
       <tr><th>日期</th><th>类型</th><th>标题 / 摘要</th><th>点赞</th></tr>
