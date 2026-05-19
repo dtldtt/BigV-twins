@@ -1,6 +1,39 @@
 // chat.js — POST a message, parse SSE stream of {delta: "..."} or [DONE]
+// Render assistant messages as markdown via marked + DOMPurify.
 
 (function () {
+  // ---- markdown rendering helpers ----------------------------
+
+  // marked is loaded via CDN in base.html; configure once.
+  if (typeof marked !== "undefined") {
+    marked.setOptions({
+      breaks: true,        // single newline → <br>
+      gfm: true,           // GitHub-flavored: tables, strikethrough, etc.
+      headerIds: false,
+      mangle: false,
+    });
+  }
+
+  function renderMarkdown(text) {
+    if (typeof marked === "undefined" || typeof DOMPurify === "undefined") {
+      return null;  // libs not loaded; caller will fall back to text
+    }
+    const html = marked.parse(text || "");
+    return DOMPurify.sanitize(html, {
+      ALLOWED_ATTR: ["href", "title", "target", "rel", "src", "alt"],
+      ADD_ATTR: ["target"],
+    });
+  }
+
+  // Render all historical assistant bubbles on page load.
+  document.querySelectorAll(".chat-bubble.assistant[data-raw]").forEach((el) => {
+    const raw = el.getAttribute("data-raw");
+    const html = renderMarkdown(raw);
+    if (html !== null) el.innerHTML = html;
+  });
+
+  // ---- chat form ---------------------------------------------
+
   const form = document.getElementById("ask-form");
   if (!form) return;
   const cid = form.dataset.cid;
@@ -13,16 +46,34 @@
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
-  function appendBubble(role, text) {
+  function appendUserBubble(text) {
     if (emptyHint) emptyHint.remove();
     const div = document.createElement("div");
-    div.className = "chat-bubble " + role;
-    const pre = document.createElement("pre");
-    pre.textContent = text;
-    div.appendChild(pre);
+    div.className = "chat-bubble user";
+    div.textContent = text;
     messagesEl.appendChild(div);
     scrollDown();
-    return pre;
+    return div;
+  }
+
+  function appendAssistantBubble(placeholder) {
+    if (emptyHint) emptyHint.remove();
+    const div = document.createElement("div");
+    div.className = "chat-bubble assistant";
+    div.textContent = placeholder;
+    messagesEl.appendChild(div);
+    scrollDown();
+    return div;
+  }
+
+  function updateAssistant(bubble, text) {
+    const html = renderMarkdown(text);
+    if (html === null) {
+      bubble.textContent = text;
+    } else {
+      bubble.innerHTML = html;
+    }
+    scrollDown();
   }
 
   async function send() {
@@ -32,8 +83,8 @@
     sendBtn.disabled = true;
     sendBtn.textContent = "…";
 
-    appendBubble("user", text);
-    const assistantPre = appendBubble("assistant", "🔍 检索中…");
+    appendUserBubble(text);
+    const assistantEl = appendAssistantBubble("🔍 检索中…");
     let buf = "";
     let firstDelta = true;
 
@@ -45,7 +96,7 @@
       });
       if (!resp.ok) {
         const t = await resp.text();
-        assistantPre.textContent = `⚠ HTTP ${resp.status}: ${t.slice(0,200)}`;
+        assistantEl.textContent = `⚠ HTTP ${resp.status}: ${t.slice(0,200)}`;
         return;
       }
       const reader = resp.body.getReader();
@@ -62,21 +113,18 @@
           for (const line of ev.split("\n")) {
             if (!line.startsWith("data:")) continue;
             const payload = line.slice(5).trim();
-            if (payload === "[DONE]") {
-              continue;
-            }
+            if (payload === "[DONE]") continue;
             try {
               const obj = JSON.parse(payload);
               if (obj.error) {
-                assistantPre.textContent = `⚠ ${obj.error}`;
+                assistantEl.textContent = `⚠ ${obj.error}`;
               } else if (typeof obj.delta === "string") {
                 if (firstDelta) {
-                  assistantPre.textContent = "";
+                  assistantEl.textContent = "";
                   firstDelta = false;
                 }
                 buf += obj.delta;
-                assistantPre.textContent = buf;
-                scrollDown();
+                updateAssistant(assistantEl, buf);
               }
             } catch (e) {
               console.warn("bad SSE payload", payload, e);
@@ -85,11 +133,10 @@
         }
       }
       if (firstDelta) {
-        // never got a delta
-        assistantPre.textContent = buf || "(空响应)";
+        assistantEl.textContent = buf || "(空响应)";
       }
     } catch (err) {
-      assistantPre.textContent = "⚠ " + err.message;
+      assistantEl.textContent = "⚠ " + err.message;
     } finally {
       sendBtn.disabled = false;
       sendBtn.textContent = "发送";
@@ -105,6 +152,5 @@
     }
   });
 
-  // auto-scroll initial state to bottom
   scrollDown();
 })();

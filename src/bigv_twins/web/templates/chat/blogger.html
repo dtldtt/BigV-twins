@@ -21,11 +21,11 @@
       <button type="submit" style="width:100%">+ 新对话</button>
     </form>
     <small class="muted">与 {{ blogger.name }} 的历史</small>
-    <ul style="padding-left:0;list-style:none">
+    <ul>
       {% for c in convos %}
-        <li style="margin:0.4rem 0">
+        <li style="margin:0.5rem 0">
           <a href="/chat/{{ blogger.slug }}/{{ c.id }}"
-             {% if current_conv and current_conv.id == c.id %}style="font-weight:bold"{% endif %}>
+             class="{% if current_conv and current_conv.id == c.id %}active{% endif %}">
             {{ c.title }}
           </a>
           <br><small class="muted">{{ c.updated_at.strftime("%m-%d %H:%M") }}</small>
@@ -43,16 +43,19 @@
         <span class="muted"> · {{ current_conv.title }}</span>
         <form method="post" action="/chat/{{ current_conv.id }}/delete" style="float:right;margin:0"
               onsubmit="return confirm('删除这条对话？不可恢复');">
-          <button type="submit" class="secondary outline" style="padding:0.2rem 0.6rem">删除对话</button>
+          <button type="submit" class="secondary outline" style="padding:0.25rem 0.7rem">删除对话</button>
         </form>
       {% endif %}
     </header>
 
     <div id="messages" class="chat-messages">
       {% for m in messages %}
-        <div class="chat-bubble {{ m.role }}">
-          <pre>{{ m.content }}</pre>
-        </div>
+        {% if m.role == "user" %}
+          <div class="chat-bubble user">{{ m.content }}</div>
+        {% else %}
+          {# assistant: store raw markdown in data-raw, JS renders to HTML on load #}
+          <div class="chat-bubble assistant" data-raw="{{ m.content }}">{{ m.content }}</div>
+        {% endif %}
       {% endfor %}
       {% if not messages %}
         <p class="muted" id="empty-hint">
@@ -67,7 +70,7 @@
 
     {% if current_conv %}
       <form id="ask-form" class="chat-input" data-cid="{{ current_conv.id }}">
-        <textarea id="msg-input" placeholder="问点什么… (Cmd/Ctrl+Enter 发送)" required></textarea>
+        <textarea id="msg-input" rows="4" placeholder="问点什么… (Cmd/Ctrl+Enter 发送)" required></textarea>
         <button type="submit" id="send-btn">发送</button>
       </form>
     {% endif %}

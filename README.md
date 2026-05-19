@@ -22,6 +22,7 @@
 - [12. 故障排查](#12-故障排查)
 - [13. 文件清单](#13-文件清单)
 - [14. 赛博大V Web UI（可选）](#14-赛博大v-web-ui可选)
+  - [14.10 HTTPS（推荐：Caddy + nip.io）](#1410-https推荐caddy--nipio无需买域名)
 
 ---
 
@@ -161,6 +162,9 @@ BigV-twins/
 │   ├── sanren.db         (35 MB)
 │   └── shen.db           (~300 MB 全量)
 │   ⚠ 默认 gitignore；迁移时可单独 rsync 节省重建时间
+│
+├── deploy/                         ← 运维模板
+│   └── Caddyfile.example           (反代 + 自动 HTTPS；见 §14.10)
 │
 ├── logs/                           ← 索引器 + MCP server + web 日志（gitignored）
 │   ├── bootstrap.log
@@ -746,6 +750,51 @@ p.write_text(json.dumps(d, indent=2, ensure_ascii=False))
 ```
 
 `chats.db` 保留——下次启用还能继续。
+
+### 14.10 HTTPS（推荐：Caddy + nip.io，无需买域名）
+
+WEB_HOST 默认 `127.0.0.1`，即只本机可访问。要让外网用户安全访问（密码不明文传），强烈建议在前面套一层 Caddy 反代 + 自动 HTTPS。
+
+#### 一次性安装
+
+```bash
+# 1. 在阿里云 ECS 安全组开放入方向 TCP 80 + 443（保持 8001 不开放）
+# 2. 安装 Caddy（Debian / Ubuntu）
+sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https curl
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
+    | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
+    | sudo tee /etc/apt/sources.list.d/caddy-stable.list
+sudo apt update && sudo apt install -y caddy
+
+# 3. 用项目里的模板（改成你自己的 hostname）
+sudo cp deploy/Caddyfile.example /etc/caddy/Caddyfile
+sudo vim /etc/caddy/Caddyfile   # 把 8-155-174-112.nip.io 改成你 IP 对应的形式
+
+# 4. reload；首次启动会自动向 Let's Encrypt 申请证书（~15s）
+sudo systemctl reload caddy
+sudo journalctl -u caddy -n 30
+# 看到 "certificate obtained successfully" 就完事了
+```
+
+#### nip.io 域名格式
+
+`nip.io` 是个公共 DNS，任何 `<ip>.nip.io` 自动解析到该 IP，无需注册：
+
+- `1.2.3.4.nip.io`     → 1.2.3.4
+- `1-2-3-4.nip.io`     → 1.2.3.4  （建议用这个，单层子域，Let's Encrypt 不会撞速率限制）
+
+也可换成自己的域名——只要 DNS A 记录指向本机 IP，Caddyfile 里的 hostname 改成你的域名即可。
+
+#### 改完后
+
+- 把 `.env` 的 `WEB_HOST` 改回 `127.0.0.1` 然后 `systemctl --user restart bigv-twins-web`
+- zhihu 站点 nav 里的链接改成 `https://你的域名.nip.io/`
+- 验证：`curl -I https://你的域名.nip.io/login` 应返回 200
+
+#### 证书续期
+
+Caddy 自动管。到期前 ~30 天会自动续。`sudo journalctl -u caddy --since 24h | grep -i renew` 看续期记录。
 
 ---
 

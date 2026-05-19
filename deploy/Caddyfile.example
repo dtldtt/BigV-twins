@@ -1,0 +1,35 @@
+# BigV-twins / 赛博大V — Caddy reverse proxy with auto-HTTPS.
+#
+# Place at /etc/caddy/Caddyfile (or include from there), then:
+#   sudo systemctl reload caddy
+#
+# Replace the hostname below with your own:
+#   - nip.io  (no domain needed)  → e.g. 1-2-3-4.nip.io  for IP 1.2.3.4
+#   - sslip.io similar
+#   - your own domain via DNS A record
+#
+# Prerequisites:
+#   1. ports 80 + 443 open inbound on your firewall / cloud security group
+#   2. bigv-twins-web running on 127.0.0.1:8001 (default; see WEB_HOST in .env)
+#   3. DNS for the chosen hostname resolves to this host's public IP
+
+8-155-174-112.nip.io {
+    encode gzip
+
+    reverse_proxy 127.0.0.1:8001 {
+        # Surface the real client IP so the in-app rate-limiter sees it
+        header_up X-Forwarded-For {remote_host}
+        header_up X-Real-IP      {remote_host}
+
+        # SSE chat streaming can run 1–3 minutes; default 60s would kill it
+        transport http {
+            response_header_timeout 300s
+            read_timeout            300s
+        }
+    }
+
+    # Optional: send Caddy access logs to a separate file
+    # log {
+    #     output file /var/log/caddy/bigv-twins.log
+    # }
+}
