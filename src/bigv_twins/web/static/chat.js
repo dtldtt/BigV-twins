@@ -1,31 +1,41 @@
 // chat.js — POST a message, parse SSE stream of {delta: "..."} or [DONE]
 // Render assistant messages as markdown via marked + DOMPurify.
+// All <a> links open in a new tab via a DOMPurify hook.
 
 (function () {
-  // ---- markdown rendering helpers ----------------------------
+  // ---- markdown setup ----------------------------------------
 
-  // marked is loaded via CDN in base.html; configure once.
   if (typeof marked !== "undefined") {
     marked.setOptions({
-      breaks: true,        // single newline → <br>
-      gfm: true,           // GitHub-flavored: tables, strikethrough, etc.
+      breaks: true,
+      gfm: true,
       headerIds: false,
       mangle: false,
     });
   }
 
+  // Make every rendered <a> open in a new tab, safely.
+  // DOMPurify's afterSanitizeAttributes hook runs on every sanitize() call.
+  if (typeof DOMPurify !== "undefined") {
+    DOMPurify.addHook("afterSanitizeAttributes", function (node) {
+      if (node.tagName === "A" && node.hasAttribute("href")) {
+        node.setAttribute("target", "_blank");
+        node.setAttribute("rel", "noopener noreferrer");
+      }
+    });
+  }
+
   function renderMarkdown(text) {
     if (typeof marked === "undefined" || typeof DOMPurify === "undefined") {
-      return null;  // libs not loaded; caller will fall back to text
+      return null;
     }
     const html = marked.parse(text || "");
     return DOMPurify.sanitize(html, {
       ALLOWED_ATTR: ["href", "title", "target", "rel", "src", "alt"],
-      ADD_ATTR: ["target"],
     });
   }
 
-  // Render all historical assistant bubbles on page load.
+  // Render historical assistant bubbles on page load.
   document.querySelectorAll(".chat-bubble.assistant[data-raw]").forEach((el) => {
     const raw = el.getAttribute("data-raw");
     const html = renderMarkdown(raw);
