@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}{{ blogger.name }} · 关于{% endblock %}
+
+{% block content %}
+<nav><ul><li><a href="/chat">← 所有博主</a></li></ul></nav>
+
+<article style="margin-bottom:1rem">
+  <header>
+    <h2 style="margin:0 0 0.4rem 0">{{ blogger.name }}</h2>
+    {% if blogger.tagline %}
+      <p class="muted" style="margin:0 0 0.5rem 0">💡 {{ blogger.tagline }}</p>
+    {% endif %}
+    <p class="muted" style="margin:0">
+      🔗 <a href="https://www.zhihu.com/people/{{ blogger.url_token }}" target="_blank" rel="noopener">知乎主页</a>
+      {% if author.headline %} · {{ author.headline }}{% endif %}
+    </p>
+  </header>
+
+  {% if author %}
+    <div class="grid" style="gap:0.4rem">
+      <div><strong>{{ author.follower_count or "?" }}</strong><br><small class="muted">关注</small></div>
+      <div><strong>{{ author.answer_count or "?" }}</strong><br><small class="muted">答案</small></div>
+      <div><strong>{{ author.article_count or "?" }}</strong><br><small class="muted">文章</small></div>
+      <div><strong>{{ author.pin_count or "?" }}</strong><br><small class="muted">想法</small></div>
+    </div>
+  {% endif %}
+
+  <footer>
+    <a href="/chat/{{ blogger.slug }}" role="button" style="width:auto">💬 开始对话</a>
+  </footer>
+</article>
+
+<details open style="margin-bottom:1rem">
+  <summary><strong>风格画像</strong>（由模型基于博主高赞内容自动总结）</summary>
+  {% if persona_text %}
+    <div id="persona-content" data-raw="{{ persona_text }}"
+         style="background:#fff;border:1px solid #e5e7eb;border-radius:6px;padding:1rem;margin-top:0.5rem">
+      <pre style="margin:0;white-space:pre-wrap;font-family:inherit">{{ persona_text }}</pre>
+    </div>
+  {% else %}
+    <p class="muted">（此博主的 persona 还没生成；运行 <code>python scripts/generate_personas.py --blogger {{ blogger.slug }}</code>）</p>
+  {% endif %}
+</details>
+
+<details>
+  <summary><strong>历史高赞 Top 5</strong></summary>
+  <table style="margin-top:0.5rem">
+    <thead>
+      <tr><th>类型</th><th>标题 / 摘要</th><th>点赞</th><th>日期</th></tr>
+    </thead>
+    <tbody>
+      {% for p in top_posts %}
+        <tr>
+          <td><small class="muted">{{ p.content_type }}</small></td>
+          <td><a href="{{ p.url }}" target="_blank" rel="noopener">{{ p.title or "(无标题)" }}</a></td>
+          <td><strong>{{ p.voteup_count }}</strong></td>
+          <td><small class="muted">{{ p.created_time[:10] if p.created_time else "—" }}</small></td>
+        </tr>
+      {% else %}
+        <tr><td colspan="4" class="muted">（无数据）</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</details>
+
+<details>
+  <summary><strong>最近 10 条</strong></summary>
+  <table style="margin-top:0.5rem">
+    <thead>
+      <tr><th>日期</th><th>类型</th><th>标题 / 摘要</th><th>点赞</th></tr>
+    </thead>
+    <tbody>
+      {% for p in recent_posts %}
+        <tr>
+          <td><small class="muted">{{ p.created_time[:10] if p.created_time else "—" }}</small></td>
+          <td><small class="muted">{{ p.content_type }}</small></td>
+          <td><a href="{{ p.url }}" target="_blank" rel="noopener">{{ p.title or "(无标题)" }}</a></td>
+          <td>{{ p.voteup_count }}</td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</details>
+
+<script>
+  // Render persona markdown if marked + DOMPurify are loaded
+  document.querySelectorAll("#persona-content[data-raw]").forEach((el) => {
+    if (typeof marked === "undefined" || typeof DOMPurify === "undefined") return;
+    const raw = el.getAttribute("data-raw");
+    const html = DOMPurify.sanitize(marked.parse(raw));
+    el.innerHTML = html;
+  });
+</script>
+{% endblock %}

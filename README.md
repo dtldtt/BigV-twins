@@ -131,8 +131,11 @@ BigV-twins/
 │       ├── templates/{base,login,register,placeholder,chat/*,admin/*}.html
 │       └── static/{style.css, chat.js}
 │
+├── bloggers.json                   ← 博主元数据（slug / author_id / url_token / name / tagline）
+│
 ├── scripts/
-│   ├── generate_personas.py        ← 一次性 persona 生成（读 openclaw.json 自动调配的 provider）
+│   ├── add_blogger.py              ← 一键添加新博主（更新 json + 索引 + persona + skill + 复制）
+│   ├── generate_personas.py        ← persona 生成（分层采样 + 可选 verify 自校）
 │   ├── generate_skills.py          ← 模板化生成 4 个 SKILL.md
 │   └── test_mcp_client.py          ← MCP 服务端到端冒烟测试
 │
@@ -463,44 +466,94 @@ systemctl --user restart bigv-twins-server     # 重启
 
 ## 9. 添加一个新博主
 
-假设你想加 `xinwen-libao` (`example-token-99`)：
+**前提**：zhihu 项目那边已经把这个博主加进爬虫并跑了至少一轮，所以 `zhihu.db.authors`
+里有这个人。你需要知道两件事：
+
+| 你提供 | 说明 |
+|---|---|
+| `--author-id N` | 该博主在 `zhihu.db.authors` 里的 id（`sqlite3 zhihu.db "select * from authors"` 看一眼） |
+| `--slug` | 你想给他起的短名（小写字母 / 数字 / `-`），如 `mr-dang` / `newbie`。会出现在 URL 和 skill 名里 |
+| `--tagline`（可选但强烈推荐） | 一句话简介，会显示在 `/chat` 卡片上 |
+
+**一条命令搞定**：
 
 ```bash
-# 1. zhihu 项目那边先把这个博主加进爬虫并跑一遍（不在本项目范围）
-
-# 2. 把博主元信息加到 src/bigv_twins/config.py 的 BLOGGERS tuple:
-#    Blogger(slug="xinwen", author_id=5, url_token="example-token-99", name="新闻立波"),
-
-# 3. 加触发别名到 scripts/generate_skills.py 的 ALIASES dict:
-#    "xinwen": "立波、新闻立波、libao",
-
-# 4. 重生成 skill + 索引 + persona + 复制
 conda activate bigv-twins && cd /path/to/BigV-twins
-python scripts/generate_skills.py --blogger xinwen
-python -m bigv_twins.index --blogger xinwen
-python scripts/generate_personas.py --blogger xinwen
-cp -r skills/bigv-xinwen ~/.openclaw/workspace/skills/
+python scripts/add_blogger.py \
+  --author-id 5 \
+  --slug newbie \
+  --tagline "趋势交易 · 重视成交量" \
+  [--name "新博主"]    # 可选，默认从 zhihu.db 取
+```
 
-# 5. 验证
-openclaw skills list | grep bigv-xinwen
-openclaw agent --agent main -m "新闻立波 怎么看 X"
+脚本自动做的事：
+1. 验证 author_id 在 zhihu.db 存在；读 name + url_token
+2. 追加到 `bloggers.json`（in-process settings 缓存的需要 web 重启才生效）
+3. 跑全量索引（新博主第一次会跑几分钟到几小时，看体量）
+4. 用 OpenClaw 配的 LLM 生成 persona
+5. 渲染 SKILL.md
+6. 复制到 `~/.openclaw/workspace/skills/bigv-{slug}/`
+
+跑完一条提示：
+
+```bash
+systemctl --user restart bigv-twins-web    # 让 web 卡片显示新博主
+# 在 OpenClaw agent 测试：
+openclaw agent --agent main -m "新博主 你怎么看 X"
 ```
 
 MCP server **不用重启**——它每次请求都重新打开对应 .db 文件。
+
+每个 `--skip-*` 阶段都能单独跳过（比如已经索引过、只想重生 persona）。
 
 ---
 
 ## 10. 刷新 persona
 
-Persona 会随博主风格 drift 而变得不准。建议每 1–2 月或大事件后刷新一次：
+Persona 会随博主风格 drift 而变得不准。建议每 1–2 月或大事件后刷新一次。
+
+### 简单刷新（默认）— 分层采样
 
 ```bash
 conda activate bigv-twins && cd /path/to/BigV-twins
-python scripts/generate_personas.py --force        # 刷新全部
-python scripts/generate_personas.py --blogger eyu --force  # 只刷新一个
+python scripts/generate_personas.py --force                # 全部 4 个
+python scripts/generate_personas.py --blogger eyu --force  # 只刷新 eyu
 ```
 
-不需要重启或重新装 skill —— skill 在运行时调 `bigv-twins.get_persona`，永远读最新文件。
+默认采样：**高赞 20 + 最近 10 + 长文章 10 = 40 篇去重后**喂给 LLM 总结。
+比之前的"纯 top 30 高赞"覆盖更全（捕获近期风格 + 详细长文）。
+
+成本：每个博主一次 LLM 调用，~ ¥0.5–1（走你 OpenClaw 配的 provider，目前是 Bailian/Qwen）。
+
+### 高质量刷新 — verify 自校
+
+```bash
+python scripts/generate_personas.py --force --verify              # 全部刷新（带 verify）
+python scripts/generate_personas.py --blogger shen --force --verify
+```
+
+加 `--verify` 启动**两轮调用**：
+1. 第一轮：基于训练样本生成 persona v1
+2. 第二轮：拿**另外 10 篇没见过的代表作**给模型，让它对照 v1 找出缺失 / 偏差 / 矛盾，输出修订版
+
+成本翻倍（~ ¥1–2/博主），换来更稳的画像。建议每季度跑一次 `--verify`，平时跑无 `--verify` 的版本。
+
+### 其他参数
+
+```bash
+python scripts/generate_personas.py --help
+
+# 调采样比例（默认 20/10/10，总共 40）
+--top-voteup 30 --recent 15 --long 10
+
+# 走旧的简单逻辑（纯 top-N 高赞）
+--simple --top-n 30
+
+# 看会采样什么但不调 API
+--dry-run
+```
+
+改完不需要重启或重装 skill —— skill 在运行时调 `bigv-twins.get_persona`，永远读最新文件。
 
 ---
 

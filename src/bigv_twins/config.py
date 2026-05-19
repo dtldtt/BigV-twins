@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -12,6 +13,7 @@ class Blogger:
     author_id: int
     url_token: str
     name: str
+    tagline: str = ""           # one-line投资风格摘要; can be empty
 
     @property
     def db_filename(self) -> str:
@@ -22,13 +24,30 @@ class Blogger:
         return f"{self.slug}.md"
 
 
-BLOGGERS: tuple[Blogger, ...] = (
-    Blogger(slug="mr-dang", author_id=1, url_token="mr-dang-77",       name="MR Dang"),
-    Blogger(slug="eyu",     author_id=2, url_token="chen-ze-xin-49-22", name="寒武纪的鳄鱼"),
-    Blogger(slug="sanren",  author_id=3, url_token="10-64-17-85-40",    name="水又三人禾"),
-    Blogger(slug="shen",    author_id=4, url_token="shen-chen-7-10",    name="阳光下的沈同学"),
-)
+# Project root: src/bigv_twins/config.py -> ../../../
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_BLOGGERS_JSON = _PROJECT_ROOT / "bloggers.json"
 
+
+def _load_bloggers() -> tuple[Blogger, ...]:
+    """Read bloggers from bloggers.json (canonical source of truth).
+
+    Falls back to a built-in hardcoded list if the file is missing so the
+    package still imports cleanly during dev / installs.
+    """
+    if _BLOGGERS_JSON.exists():
+        data = json.loads(_BLOGGERS_JSON.read_text(encoding="utf-8"))
+        return tuple(Blogger(**b) for b in data)
+    # Built-in fallback (matches the four bloggers shipped with v0):
+    return (
+        Blogger(slug="mr-dang", author_id=1, url_token="mr-dang-77",       name="MR Dang"),
+        Blogger(slug="eyu",     author_id=2, url_token="chen-ze-xin-49-22", name="寒武纪的鳄鱼"),
+        Blogger(slug="sanren",  author_id=3, url_token="10-64-17-85-40",    name="水又三人禾"),
+        Blogger(slug="shen",    author_id=4, url_token="shen-chen-7-10",    name="阳光下的沈同学"),
+    )
+
+
+BLOGGERS: tuple[Blogger, ...] = _load_bloggers()
 BY_SLUG: dict[str, Blogger] = {b.slug: b for b in BLOGGERS}
 BY_AUTHOR_ID: dict[int, Blogger] = {b.author_id: b for b in BLOGGERS}
 
@@ -58,14 +77,14 @@ class Settings(BaseSettings):
     # Web chat app
     web_host: str = "127.0.0.1"
     web_port: int = 8001
-    web_secret_key: str = ""   # required; deploy.sh generates one if missing
+    web_secret_key: str = ""
 
-    # OpenClaw gateway (for chat agent calls; token auto-read from openclaw.json)
+    # OpenClaw gateway
     openclaw_base_url: str = "http://127.0.0.1:18789"
     openclaw_config_path: Path = Path.home() / ".openclaw" / "openclaw.json"
-    openclaw_agent_timeout_s: int = 180   # /v1/chat/completions can be slow
+    openclaw_agent_timeout_s: int = 180
 
-    # Optional one-shot persona generation (when openclaw is unavailable)
+    # Optional persona-gen fallback
     anthropic_api_key: str = ""
 
     def twin_db_path(self, slug: str) -> Path:
@@ -77,6 +96,10 @@ class Settings(BaseSettings):
     @property
     def chats_db_path(self) -> Path:
         return self.twins_dir.parent / "chats.db"
+
+    @property
+    def bloggers_json_path(self) -> Path:
+        return _BLOGGERS_JSON
 
 
 settings = Settings()

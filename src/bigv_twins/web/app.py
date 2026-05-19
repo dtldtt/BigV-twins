@@ -16,6 +16,7 @@ from starlette.middleware.sessions import SessionMiddleware
 from bigv_twins.config import settings
 
 from . import auth, db
+from .about import router as about_router
 from .admin import router as admin_router
 from .auth_routes import router as auth_router
 from .chat import router as chat_router
@@ -54,6 +55,7 @@ def create_app() -> FastAPI:
     app.include_router(auth_router)
     app.include_router(chat_router)
     app.include_router(admin_router)
+    app.include_router(about_router)
 
     @app.get("/", response_class=HTMLResponse)
     async def home(
