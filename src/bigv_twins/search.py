@@ -33,7 +33,12 @@ class Hit:
         return asdict(self)
 
 
-def _open_twin_ro(slug: str) -> sqlite3.Connection:
+def _open_twin_ro(slug: str, embedder: Embedder) -> sqlite3.Connection:
+    """Open ``twins/<slug>.db`` read-only, validating that it was built with
+    the same embedding model the runtime is using. Mismatch raises immediately —
+    silently letting through would mean cosine similarities computed against
+    incompatible vector spaces, which is hard to debug after the fact.
+    """
     path = settings.twin_db_path(slug)
     if not path.exists():
         raise FileNotFoundError(f"twin db missing for {slug!r}: {path}")
@@ -42,6 +47,28 @@ def _open_twin_ro(slug: str) -> sqlite3.Connection:
     conn.enable_load_extension(True)
     sqlite_vec.load(conn)
     conn.enable_load_extension(False)
+
+    row = conn.execute(
+        "SELECT value FROM meta WHERE key = 'embedding_model'"
+    ).fetchone()
+    db_model = row["value"] if row else None
+    if db_model is None:
+        # Legacy DB built before meta tracking — assume current model is correct
+        # but warn loudly. The next index --force run will populate meta.
+        log.warning(
+            "%s has no meta.embedding_model — assuming %s. Run "
+            "`python -m bigv_twins.index --blogger %s --force` to backfill meta.",
+            path.name, embedder.model_name, slug,
+        )
+    elif db_model != embedder.model_name:
+        conn.close()
+        raise RuntimeError(
+            f"{path.name} was built with embedding model {db_model!r}, "
+            f"but the running process is using {embedder.model_name!r}. "
+            f"Vector spaces are incompatible — refusing to search. "
+            f"Either change settings.embedding_model back, or rebuild this DB "
+            f"with `python -m bigv_twins.index --blogger {slug} --rebuild-all`."
+        )
     return conn
 
 
@@ -68,10 +95,11 @@ def search(
     if not query.strip():
         return []
 
-    qvec = get_embedder().encode_query(query)
+    embedder = get_embedder()
+    qvec = embedder.encode_query(query)
     qbytes = sqlite_vec.serialize_float32(qvec.tolist())
 
-    conn = _open_twin_ro(blogger_slug)
+    conn = _open_twin_ro(blogger_slug, embedder)
     try:
         candidate_k = top_k * 5 if content_type else top_k
         rows = conn.execute(

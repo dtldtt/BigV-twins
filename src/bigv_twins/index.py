@@ -1,4 +1,13 @@
-"""Incremental indexer: zhihu.db (read-only) -> twins/{slug}.db (rw)."""
+"""Incremental indexer: zhihu.db (read-only) -> twins/{slug}.db (rw).
+
+Each ``twins/<slug>.db`` records the embedding model + dim it was built with
+in its ``meta`` table. ``search.py`` checks that the runtime embedder matches
+on every open and refuses to mix.
+
+For non-zhihu sources (letters / transcripts / book), the indexer here only
+provides the framework — the actual ingester scripts live in ``scripts/`` and
+write rows directly into the same chunks/chunks_vec schema.
+"""
 
 from __future__ import annotations
 
@@ -60,7 +69,16 @@ def _open_zhihu_ro() -> sqlite3.Connection:
     return conn
 
 
-def _open_twin_rw(slug: str, dim: int) -> sqlite3.Connection:
+def _open_twin_rw(slug: str, embedder: Embedder, *, rebuild: bool = False) -> sqlite3.Connection:
+    """Open (or create) twins/<slug>.db for writing.
+
+    On open:
+      - If ``rebuild=True`` OR an existing ``meta.embedding_model`` disagrees
+        with ``embedder.model_name``, drop chunks/chunks_vec/indexed_contents
+        and recreate empty (this is a full rebuild — caller must re-ingest).
+      - Always upserts ``meta.embedding_model`` + ``meta.embedding_dim`` to
+        match the current embedder.
+    """
     settings.twins_dir.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(settings.twin_db_path(slug))
     conn.row_factory = sqlite3.Row
@@ -68,8 +86,34 @@ def _open_twin_rw(slug: str, dim: int) -> sqlite3.Connection:
     sqlite_vec.load(conn)
     conn.enable_load_extension(False)
     conn.executescript(_BASE_SCHEMA)
+
+    # Detect model mismatch via meta — this is the canonical guard.
+    row = conn.execute(
+        "SELECT value FROM meta WHERE key = 'embedding_model'"
+    ).fetchone()
+    existing_model = row["value"] if row else None
+    incompatible = existing_model is not None and existing_model != embedder.model_name
+
+    if rebuild or incompatible:
+        if incompatible:
+            log.warning(
+                "[%s] db was built with %s, current embedder is %s — rebuilding",
+                slug, existing_model, embedder.model_name,
+            )
+        conn.execute("DROP TABLE IF EXISTS chunks_vec")
+        conn.execute("DROP TABLE IF EXISTS chunks")
+        conn.execute("DROP TABLE IF EXISTS indexed_contents")
+        conn.executescript(_BASE_SCHEMA)
+
     conn.execute(
-        f"CREATE VIRTUAL TABLE IF NOT EXISTS chunks_vec USING vec0(embedding float[{dim}])"
+        f"CREATE VIRTUAL TABLE IF NOT EXISTS chunks_vec USING vec0(embedding float[{embedder.dim}])"
+    )
+    conn.executemany(
+        "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
+        [
+            ("embedding_model", embedder.model_name),
+            ("embedding_dim", str(embedder.dim)),
+        ],
     )
     conn.commit()
     return conn
@@ -101,8 +145,19 @@ def index_blogger(
     *,
     embedder: Embedder,
     force: bool = False,
+    rebuild: bool = False,
     limit: int | None = None,
 ) -> dict[str, int]:
+    if blogger.source != "zhihu":
+        raise NotImplementedError(
+            f"[{blogger.slug}] source={blogger.source!r} is not zhihu — "
+            f"use a source-specific ingester (scripts/ingest_{blogger.source}.py) instead."
+        )
+    if not blogger.has_corpus:
+        log.info("[%s] no corpus (advisor or source=none); skipping", blogger.slug)
+        return {"source_rows": 0, "skipped_unchanged": 0, "new": 0, "reindexed": 0,
+                "chunks_added": 0, "chunks_deleted": 0, "empty_after_clean": 0}
+
     counts = {
         "source_rows": 0,
         "skipped_unchanged": 0,
@@ -114,7 +169,7 @@ def index_blogger(
     }
 
     src = _open_zhihu_ro()
-    dst = _open_twin_rw(blogger.slug, embedder.dim)
+    dst = _open_twin_rw(blogger.slug, embedder, rebuild=rebuild)
     try:
         sql = (
             "SELECT zhihu_id, content_type, title, content, voteup_count, "
@@ -197,10 +252,6 @@ def index_blogger(
             "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
             ("last_indexed_at", datetime.now(timezone.utc).isoformat()),
         )
-        dst.execute(
-            "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
-            ("embedding_model", embedder.model_name),
-        )
         dst.commit()
     finally:
         dst.close()
@@ -211,8 +262,13 @@ def index_blogger(
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="BigV-twins incremental indexer")
-    parser.add_argument("--blogger", default=None, help="slug; default = all")
-    parser.add_argument("--force", action="store_true", help="reindex even if unchanged")
+    parser.add_argument("--blogger", default=None, help="slug; default = all zhihu bloggers")
+    parser.add_argument("--force", action="store_true", help="reindex content even if unchanged")
+    parser.add_argument(
+        "--rebuild-all", action="store_true",
+        help="DROP existing chunks/chunks_vec and re-ingest from scratch "
+             "(used when switching embedding models; implies --force)",
+    )
     parser.add_argument("--limit", type=int, default=None, help="cap rows (testing)")
     args = parser.parse_args()
 
@@ -227,14 +283,17 @@ def main() -> None:
             raise SystemExit(f"unknown blogger slug: {args.blogger}")
         targets = [BY_SLUG[args.blogger]]
     else:
-        targets = BLOGGERS
+        # Default = all zhihu-source bloggers (skip advisor + non-zhihu masters)
+        targets = [b for b in BLOGGERS if b.source == "zhihu"]
 
     log.info("loading embedder: %s", settings.embedding_model)
     embedder = Embedder(settings.embedding_model)
     log.info("embedder ready (dim=%d)", embedder.dim)
 
+    force = args.force or args.rebuild_all
     for b in targets:
-        c = index_blogger(b, embedder=embedder, force=args.force, limit=args.limit)
+        c = index_blogger(b, embedder=embedder, force=force,
+                          rebuild=args.rebuild_all, limit=args.limit)
         log.info("[%s] done %s", b.slug, c)
 
 

@@ -11,21 +11,29 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Blogger:
     """A "Blogger" entry in bloggers.json.
 
-    For real archived Zhihu bloggers (kind='blogger'):
+    For real archived Zhihu bloggers (kind='blogger', source='zhihu'):
       author_id, url_token, name, tagline are all populated.
       `agent` should be "bigv".
 
     For the synthetic "AI 投资顾问" (kind='advisor'):
       author_id=-1, url_token="" and only name/tagline are meaningful.
-      `agent` should be "advisor".
+      `agent` should be "advisor". `source` is irrelevant (no corpus).
+
+    For "masters" with non-Zhihu corpora (kind='master', source='letters' / 'transcripts' / 'book'):
+      author_id=-1, url_token="" — they have no Zhihu identity.
+      `agent` is typically "bigv" (role-play their voice).
+      Their twins/<slug>.db is built once by a source-specific ingester
+      (scripts/ingest_*.py) on a beefy machine and rsynced to private —
+      not refreshed by the daily zhihu indexer.
     """
     slug: str
     name: str
     author_id: int = -1
     url_token: str = ""
     tagline: str = ""
-    kind: str = "blogger"     # "blogger" | "advisor"
+    kind: str = "blogger"     # "blogger" | "advisor" | "master"
     agent: str = "bigv"       # which OpenClaw agent to route to (openclaw/<agent>)
+    source: str = "zhihu"     # "zhihu" | "letters" | "transcripts" | "book" | "none"
 
     @property
     def db_filename(self) -> str:
@@ -42,6 +50,15 @@ class Blogger:
     @property
     def is_blogger(self) -> bool:
         return self.kind == "blogger"
+
+    @property
+    def is_master(self) -> bool:
+        return self.kind == "master"
+
+    @property
+    def has_corpus(self) -> bool:
+        """True iff there's a twins/<slug>.db expected for this entry."""
+        return self.source != "none" and not self.is_advisor
 
 
 # Project root: src/bigv_twins/config.py -> ../../../
@@ -79,9 +96,9 @@ class Settings(BaseSettings):
     twins_dir: Path = Path("/home/dtl/projects/BigV-twins/twins")
     personas_dir: Path = Path("/home/dtl/projects/BigV-twins/personas")
 
-    # Embedding
+    # Embedding — model is the single source of truth; dim is derived from
+    # MODEL_REGISTRY in embed.py at runtime (not configurable here)
     embedding_model: str = "BAAI/bge-base-zh-v1.5"
-    embedding_dim: int = 768
     chunk_size: int = 600
     chunk_overlap: int = 80
 
