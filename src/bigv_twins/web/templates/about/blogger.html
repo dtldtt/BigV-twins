@@ -10,13 +10,19 @@
     {% if blogger.tagline %}
       <p class="muted" style="margin:0 0 0.5rem 0">💡 {{ blogger.tagline }}</p>
     {% endif %}
-    <p class="muted" style="margin:0">
-      🔗 <a href="https://www.zhihu.com/people/{{ blogger.url_token }}" target="_blank" rel="noopener">知乎主页</a>
-      {% if author.headline %} · {{ author.headline }}{% endif %}
-    </p>
+    {% if blogger.is_advisor %}
+      <p class="muted" style="margin:0">
+        🤖 通用 AI 投资顾问 · 不基于任何博主语料
+      </p>
+    {% else %}
+      <p class="muted" style="margin:0">
+        🔗 <a href="https://www.zhihu.com/people/{{ blogger.url_token }}" target="_blank" rel="noopener">知乎主页</a>
+        {% if author.headline %} · {{ author.headline }}{% endif %}
+      </p>
+    {% endif %}
   </header>
 
-  {% if author %}
+  {% if author and not blogger.is_advisor %}
     <div class="grid" style="gap:0.4rem">
       <div><strong>{{ author.follower_count or "?" }}</strong><br><small class="muted">关注</small></div>
       <div><strong>{{ author.answer_count or "?" }}</strong><br><small class="muted">答案</small></div>
@@ -42,6 +48,7 @@
   {% endif %}
 </details>
 
+{% if not blogger.is_advisor %}
 <details open>
   <summary style="font-size:1.1rem; padding:0.5rem 0; cursor:pointer"><strong>历史高赞 Top 5</strong></summary>
   <table style="margin-top:0.5rem">
@@ -81,6 +88,7 @@
     </tbody>
   </table>
 </details>
+{% endif %}
 
 <script>
   // Render persona markdown if marked + DOMPurify are loaded

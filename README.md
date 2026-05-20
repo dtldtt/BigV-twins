@@ -1,8 +1,10 @@
 # BigV-twins
 
-> 投资博主的"数字分身" —— 把知乎归档变成可对话的 RAG 知识库，挂在 OpenClaw agent 上随时问。
+> 投资博主的"数字分身" —— 把知乎归档变成可对话的 RAG 知识库，挂在 OpenClaw agent 上随时问；外加一位中立 AI 投顾做对照组。
 
-每个博主 = 一个 [Skill](https://docs.openclaw.ai/clawhub/skill-format.md) + 一个 [persona 摘要](personas/) + 一份 [向量化的归档](twins/) + 一个共享的 MCP server。Agent 收到问题 → 触发对应博主的 skill → 调 MCP server 读 persona 与检索语料 → 用 OpenClaw 配的 LLM 生成带引文的回答。
+5 位归档博主 = 每位一个 [Skill](https://docs.openclaw.ai/clawhub/skill-format.md) + 一份 [persona 摘要](personas/) + 一份 [向量化的归档](twins/) + 共享的两个 MCP server（博主语料 + 市场数据）。专门的 `bigv` agent 收到问题 → 调 MCP server 读 persona / 检索语料 / 拿真实行情 → 用 OpenClaw 配的 LLM 生成带引文的第一人称回答。
+
+旁边还挂了一个 `advisor` agent —— **不**接博主语料，只用市场数据 + web 搜索做中立分析，作为「对照组」。详见 [§17 多 Agent 架构](#17-多-agent-架构bigv-博主分身--advisor-投顾对照组)。
 
 ---
 
@@ -25,6 +27,8 @@
   - [14.10 HTTPS（推荐：Caddy + nip.io）](#1410-https推荐caddy--nipio无需买域名)
 - [15. 股票基本面 MCP 工具](#15-股票基本面-mcp-工具)
 - [16. 主题市场上下文（topics.json）](#16-主题市场上下文topicsjson)
+- [17. 多 Agent 架构（bigv 博主分身 + advisor 投顾对照组）](#17-多-agent-架构bigv-博主分身--advisor-投顾对照组)
+- [18. MCP Server 构建 / 部署速查](#18-mcp-server-构建--部署速查commit-拆分总览)
 
 ---
 
@@ -127,7 +131,8 @@ BigV-twins/
 │   ├── embed.py                    (sentence-transformers + BGE 封装)
 │   ├── index.py                    (增量索引器；CLI: python -m bigv_twins.index)
 │   ├── search.py                   (sqlite-vec 检索；CLI: python -m bigv_twins.search)
-│   ├── server.py                   (FastMCP server；CLI: python -m bigv_twins.server)
+│   ├── blogger_server.py           (FastMCP「博主语料」server，port 8770；见 §17)
+│   ├── market_server.py            (FastMCP「市场数据」server，port 8771；见 §17)
 │   ├── stock_data.py               (股票快照：Tencent + akshare 多源组合；见 §15)
 │   ├── market_data.py              (主题市场上下文 + topics.json 加载；见 §16)
 │   └── web/                        ← 赛博大V Web UI（FastAPI；见 §14）
@@ -136,39 +141,42 @@ BigV-twins/
 │       ├── templates/{base,login,register,placeholder,chat/*,admin/*,about/*}.html
 │       └── static/{style.css, chat.js}
 │
-├── bloggers.json                   ← 博主元数据（slug / author_id / url_token / name / tagline）
+├── bloggers.json                   ← 博主元数据（slug / author_id / url_token / name / tagline / kind / agent）
+│
+├── openclaw/                       ← OpenClaw agent 配置（版本控制；见 §17）
+│   ├── README.md
+│   ├── install_agents.sh           (provision bigv + advisor 的幂等脚本)
+│   └── agents/
+│       ├── bigv/{IDENTITY,SOUL,AGENTS}.md       (博主分身专用)
+│       └── advisor/{IDENTITY,SOUL,AGENTS}.md    (AI 投顾对照组)
 │
 ├── scripts/
 │   ├── add_blogger.py              ← 一键添加新博主（更新 json + 索引 + persona + skill + 复制）
 │   ├── generate_personas.py        ← persona 生成（分层采样 + 可选 verify 自校）
-│   ├── generate_skills.py          ← 模板化生成 4 个 SKILL.md
+│   ├── generate_skills.py          ← 模板化生成 5 个 SKILL.md
 │   └── test_mcp_client.py          ← MCP 服务端到端冒烟测试
 │
 ├── systemd/                        ← systemd 单元的源文件 + 安装脚本
-│   ├── bigv-twins-server.service   (MCP server 常驻)
+│   ├── bigv-twins-blogger.service  (博主语料 MCP server，port 8770)
+│   ├── bigv-twins-market.service   (市场数据 MCP server，port 8771)
 │   ├── bigv-twins-daily.service    (每日增量任务)
 │   ├── bigv-twins-daily.timer      (定时器：每天 03:17 + 抖动)
 │   ├── bigv-twins-web.service      (web chat UI 常驻；见 §14)
 │   └── install_systemd.sh          (复制到 ~/.config/systemd/user/ 并 enable)
 │
-├── skills/                         ← 「真相」：4 个 OpenClaw Skill 的源
+├── skills/                         ← 「真相」：5 个博主 OpenClaw Skill 的源
 │   ├── README.md
 │   ├── bigv-mr-dang/SKILL.md
 │   ├── bigv-eyu/SKILL.md
 │   ├── bigv-sanren/SKILL.md
-│   └── bigv-shen/SKILL.md
+│   ├── bigv-shen/SKILL.md
+│   └── bigv-paipi/SKILL.md
 │
 ├── personas/                       ← 生成出来的风格指南（小，进仓库）
-│   ├── mr-dang.md
-│   ├── eyu.md
-│   ├── sanren.md
-│   └── shen.md
+│   ├── mr-dang.md / eyu.md / sanren.md / shen.md / paipi.md
 │
 ├── twins/                          ← 向量化好的 RAG 数据库（每博主一个 .db）
-│   ├── mr-dang.db        (4.2 MB)
-│   ├── eyu.db            (5.1 MB)
-│   ├── sanren.db         (35 MB)
-│   └── shen.db           (~300 MB 全量)
+│   ├── mr-dang.db / eyu.db / sanren.db / shen.db / paipi.db
 │   ⚠ 默认 gitignore；迁移时可单独 rsync 节省重建时间
 │
 ├── deploy/                         ← 运维模板
@@ -176,7 +184,7 @@ BigV-twins/
 │
 ├── logs/                           ← 索引器 + MCP server + web 日志（gitignored）
 │   ├── bootstrap.log
-│   ├── mcp_server.log
+│   ├── mcp_blogger.log / mcp_market.log
 │   ├── daily_index.log
 │   └── web.log
 │
@@ -188,11 +196,15 @@ BigV-twins/
 | 路径 | 内容 | 关系 |
 |---|---|---|
 | `~/.config/systemd/user/bigv-twins-*.{service,timer}` | systemd 单元 | 由 `systemd/install_systemd.sh` 复制 |
-| `~/.openclaw/workspace/skills/bigv-*/` | 4 个 SKILL.md | 由 `deploy.sh` 从 `skills/` 复制 |
-| `~/.openclaw/openclaw.json` 里的 `mcp.servers.bigv-twins` | MCP 连接配置 | 由 `openclaw mcp set` 写入 |
+| `~/.openclaw/workspace-bigv/skills/bigv-*/` | 5 个博主 SKILL.md | 由 `deploy.sh` 从 `skills/` 复制 |
+| `~/.openclaw/workspace-bigv/{IDENTITY,SOUL,AGENTS}.md` | bigv agent 身份定义 | 由 `openclaw/install_agents.sh` 写入 |
+| `~/.openclaw/workspace-advisor/{IDENTITY,SOUL,AGENTS}.md` | advisor agent 身份定义 | 同上 |
+| `~/.openclaw/workspace-advisor/skills/agent-browser/` | advisor 的 web 搜索能力 | 同上（从 main workspace 复制） |
+| `~/.openclaw/openclaw.json` 里的 `mcp.servers.{bigv-blogger,bigv-market}` | MCP 连接配置 | 由 `openclaw mcp servers set` 写入 |
 | `~/.cache/huggingface/...` | BGE-base-zh-v1.5 模型权重（~400 MB） | 首次 embed 时自动下载 |
 
-更新 `skills/` 后**必须**重新复制到 OpenClaw workspace（见 §9）。
+更新 `skills/` 后**必须**重新复制到 OpenClaw workspace（见 §9）；
+更新 `openclaw/agents/*/` 后跑 `bash openclaw/install_agents.sh` 同步（见 §17）。
 
 ---
 
@@ -1065,6 +1077,164 @@ print(format_market_context_for_prompt(get_market_context(topics)))
 - HK 指数 primary（akshare 东方财富 `stock_hk_index_daily_em`）经常 503，**已自动 fallback 到 Tencent**（只给 spot，无历史）。如果需要 HK 历史，可以扩展加第二条 fallback（雪球之类）
 - 行业 ETF 用的是 `tencent_quote`，**只有 spot 价**，没有 1 周/1 月历史。够用但不深；要历史的话可以改 type 为 `ak_a_share` 走新浪的 `stock_zh_a_daily`（部分 ETF 会失败，需测试）
 - topics.json 的关键词是简单 substring 匹配，不做分词，所以 "黄金时代" 也会触发 `gold`。粒度够用，需要更细可以引入 jieba
+
+---
+
+## 17. 多 Agent 架构（bigv 博主分身 + advisor 投顾对照组）
+
+### 17.1 为什么不让 main agent 来扮演博主
+
+OpenClaw `main` agent 自带一个固定 IDENTITY（`小索 / 🧑‍🎓 apprentice/disciple`），
+SOUL 里也有「Be the assistant you'd actually want to talk to at 2am」之类的口头禅。
+这些注入会**污染**博主角色扮演——agent 偶尔会把自我介绍的语气、emoji、
+markdown 偏好混进博主语气，造成身份漂移（「鳄鱼认为」「博主曾说」之类的第三人称叙述）。
+
+解决：把博主分身彻底搬到一个**专门的、无固定身份的** agent 里。
+
+### 17.2 两个 agent + 两个 MCP server
+
+```
+┌────────────────────────────────────────────────────────────────────┐
+│  /chat (FastAPI) —— 用户在 web 上点博主或投顾卡片                  │
+└────────────────────┬─────────────────────┬─────────────────────────┘
+                     │                     │
+                     │ kind=blogger        │ kind=advisor
+                     ▼                     ▼
+            ┌──────────────────┐    ┌──────────────────┐
+            │  openclaw/bigv   │    │ openclaw/advisor │
+            │  (角色扮演执行器) │    │ (中立分析助手)    │
+            └──────┬─────┬─────┘    └──────┬─────┬─────┘
+                   │     │                  │     │
+        bigv-blogger    bigv-market      bigv-market   agent-browser
+        (port 8770)     (port 8771)      (port 8771)   (skill, web search)
+        语料 + persona  行情 + 估值       行情 + 估值    抓公开新闻
+```
+
+| 维度        | `bigv` agent                              | `advisor` agent                          |
+| ----------- | ----------------------------------------- | ---------------------------------------- |
+| 用途        | 扮演 5 位归档博主的角色                   | 通用投资顾问，对照组                     |
+| Workspace   | `~/.openclaw/workspace-bigv`              | `~/.openclaw/workspace-advisor`          |
+| 默认模型    | `bailian/qwen3.5-plus`                    | `bailian/qwen3.5-plus`                   |
+| MCP 白名单  | `bigv-blogger.*` + `bigv-market.*`        | `bigv-market.*` only                     |
+| Skills      | （不需要，纯靠 MCP）                       | `agent-browser`（用于 web 搜索）         |
+| 语料库      | 5 位博主的 RAG                            | **无**（只看公开数据）                    |
+| 第一/三人称 | 第一人称（「我认为」）                    | 第三人称（「该股票」「市场」）            |
+| 路由        | `bloggers.json` 里 `agent: "bigv"` 时触发 | `bloggers.json` 里 `agent: "advisor"`    |
+
+### 17.3 MCP server 拆分原因
+
+原本一个 `bigv-twins` MCP server 同时暴露**博主语料**（search/persona/...）+
+**市场数据**（stock_snapshot/market_context）。advisor agent 不该看到博主语料，
+所以按职责拆成两个 server，prompt 层面再给 advisor 加上 `bigv-blogger.*` 黑名单：
+
+- `bigv-twins-blogger.service`（port 8770）—— 博主专用
+  - `list_bloggers / search / get_persona / get_recent / get_post`
+  - 资源：`persona://blogger/{slug}`
+- `bigv-twins-market.service`（port 8771）—— 通用行情
+  - `get_stock_snapshot / get_market_context`
+
+OpenClaw 当前**不能**在 config 层级按 agent 过滤 MCP 工具，所以白/黑名单是
+通过 IDENTITY/AGENTS.md + system prompt 共同实现的（见 `openclaw/agents/`）。
+
+### 17.4 部署一个新机器（多 agent 部分）
+
+```bash
+# 假设 deploy.sh 已跑完（systemd / mcp / web 都起来了）
+cd ~/projects/BigV-twins
+
+# 一键 provision 两个 agent
+bash openclaw/install_agents.sh
+# 它会：
+#   1) openclaw agents add bigv     --workspace ~/.openclaw/workspace-bigv
+#   2) openclaw agents add advisor  --workspace ~/.openclaw/workspace-advisor
+#   3) 把 openclaw/agents/{bigv,advisor}/{IDENTITY,SOUL,AGENTS}.md 复制进对应 workspace
+#   4) 把 main workspace 的 agent-browser skill 复制到 workspace-advisor
+#   5) 注册 bigv-blogger / bigv-market 两个 MCP server
+
+# 验证
+PATH=$HOME/.nvm/versions/node/$(ls ~/.nvm/versions/node | tail -1)/bin:$PATH \
+  openclaw agents list
+PATH=...   openclaw mcp servers list
+```
+
+### 17.5 「AI 投顾」是什么 / 不是什么
+
+**它是**：
+
+- 通用 AI 投资分析助手，**不**模仿任何博主
+- 中立、第三方视角；用 K 线 / 均线 / MACD / RSI / 布林带 / 量价等通用框架
+- 输出结构：基本面 → 技术面 → 资金面 → 风险点
+- 数据来自 `bigv-market` MCP（实时行情 / 估值 / 大盘）+ `agent-browser`（公开新闻）
+
+**它不是**：
+
+- 不是博主分身——它**严格禁止**调用 `bigv-blogger.*` 工具
+- 不下买/卖断言（用「关注 / 留意 / 警惕」之类的措辞）
+- 不带博主的口头禅、签名、风格
+
+UI 上它在 `/chat` 卡片网格的**最后一位**，紫蓝渐变背景 + 🤖 emoji，
+有 `对照组` 标签明确区分。同一个问题用户既能问博主、又能问投顾，
+做"两种视角对比"。
+
+### 17.6 修改 agent 身份的流程
+
+1. 改 `openclaw/agents/<agent>/{IDENTITY,SOUL,AGENTS}.md`
+2. 跑 `bash openclaw/install_agents.sh`（幂等，会覆盖 workspace 里的版本）
+3. 不需要重启 openclaw-gateway——下一次 `/v1/chat/completions` 调用就生效
+4. 验证：`curl https://8-155-174-112.nip.io/chat/eyu` 然后随便发个消息，
+   看回答风格是否符合预期
+
+如果你在测试时 hand-edit 了 `~/.openclaw/workspace-bigv/AGENTS.md` 直接
+试效果，**记得**最后把改动 copy 回 `openclaw/agents/bigv/AGENTS.md` 并提交，
+不然下次跑 `install_agents.sh` 会被覆盖。
+
+---
+
+## 18. MCP Server 构建 / 部署速查（commit 拆分总览）
+
+> 这一节是给"想看整个 MCP 是怎么搭起来的"人的快速索引。
+
+### 18.1 代码
+
+| 文件                                                | 职责                                                   |
+| --------------------------------------------------- | ------------------------------------------------------ |
+| `src/bigv_twins/blogger_server.py`                  | 博主语料 MCP server（FastMCP，streamable-http，:8770） |
+| `src/bigv_twins/market_server.py`                   | 市场数据 MCP server（FastMCP，streamable-http，:8771） |
+| `src/bigv_twins/search.py`                          | sqlite-vec 检索后端（被 blogger_server 调用）          |
+| `src/bigv_twins/stock_data.py`                      | 股票快照（多源；被 market_server 调用）                |
+| `src/bigv_twins/market_data.py`                     | 主题市场上下文（被 market_server + web/chat.py 调用）  |
+| `pyproject.toml` 里的 `bigv-twins-{blogger,market}-server` entry points | `python -m` 等价的 CLI 入口         |
+
+### 18.2 systemd
+
+| 单元                              | 作用                                          |
+| --------------------------------- | --------------------------------------------- |
+| `bigv-twins-blogger.service`      | 把 blogger_server 拉常驻在 :8770              |
+| `bigv-twins-market.service`       | 把 market_server 拉常驻在 :8771               |
+
+`systemd/install_systemd.sh` 会把它们 enable 到 user-level systemd
+（需 `loginctl enable-linger dtl`）。
+
+### 18.3 OpenClaw 注册
+
+```bash
+openclaw mcp servers set bigv-blogger --url http://127.0.0.1:8770/mcp --transport streamable-http
+openclaw mcp servers set bigv-market  --url http://127.0.0.1:8771/mcp --transport streamable-http
+```
+
+由 `openclaw/install_agents.sh` 帮你跑。
+
+### 18.4 详细介绍
+
+- 博主 MCP 工具用法 → §15（股票快照） + §16（市场上下文）
+- agent 怎么调用这些工具 → §17.2 表格 + 各 agent 的 `AGENTS.md`
+- skills 怎么和 MCP 配合 → §10（skills/ 目录）+ skill 文件里的 `## 工具`
+
+### 18.5 不要做的
+
+- ❌ **不要**让 main agent 调 `bigv-blogger.*`（main 自带的 IDENTITY 会污染博主语气）
+- ❌ **不要**让 advisor agent 调 `bigv-blogger.*`（这是策略性禁止，让 advisor 保持中立）
+- ❌ **不要**把端口暴露到公网（127.0.0.1 only；走 OpenClaw gateway 才接外部）
 
 ---
 

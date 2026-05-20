@@ -53,6 +53,30 @@ async def about_page(
 
     blogger = BY_SLUG[slug]
 
+    # Advisor (kind='advisor') has no zhihu archive — render a minimal page.
+    if blogger.is_advisor:
+        return templates.TemplateResponse(
+            request=request,
+            name="about/blogger.html",
+            context={
+                "user": user,
+                "blogger": blogger,
+                "author": {},
+                "top_posts": [],
+                "recent_posts": [],
+                "persona_text": (
+                    "## 这不是一位归档博主\n\n"
+                    "「AI 投顾」是用作**对照组**的中立分析助手，不基于任何博主语料。\n\n"
+                    "- 用 `bigv-market` 拿真实行情 / 估值\n"
+                    "- 用 `agent-browser` 抓权威公开页面（财联社 / 第一财经 / 公告等）\n"
+                    "- 输出结构化分析：基本面 / 技术面 / 资金面 / 风险点\n"
+                    "- 不站队、不模仿、不下买卖断言\n\n"
+                    "在「赛博大V」上你既能问博主分身、又能问这位 AI 投顾——"
+                    "用同一个问题对比两种视角。\n"
+                ),
+            },
+        )
+
     # Live stats from zhihu.db
     src = _open_zhihu_ro()
     try:
