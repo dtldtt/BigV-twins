@@ -24,6 +24,7 @@
 - [14. 赛博大V Web UI（可选）](#14-赛博大v-web-ui可选)
   - [14.10 HTTPS（推荐：Caddy + nip.io）](#1410-https推荐caddy--nipio无需买域名)
 - [15. 股票基本面 MCP 工具](#15-股票基本面-mcp-工具)
+- [16. 主题市场上下文（topics.json）](#16-主题市场上下文topicsjson)
 
 ---
 
@@ -931,9 +932,138 @@ print(format_snapshot_human(get_stock_snapshot('688981')))
 ### 15.7 已知限制 / TODO
 
 - 暂没拉**股息率 / ROE / 营收同比 / 净利同比**（akshare 财报接口在东方财富一侧抽风，需要找替代源）
-- 港股**指数（恒生）** 没拉，只有 Tencent 个股报价
-- 美股没正经数据，agent 只能按 ticker 名透传 + 训练知识
+- 美股没正经个股数据，agent 只能按 ticker 名透传 + 训练知识
 - 没拉**最近重要公告/新闻**（v2 可加）
+
+注：宏观 / 板块 / 资产类话题（港股 / 黄金 / 煤炭 / AI 等）由独立的「主题市场上下文」机制处理 —— 见 §16。
+
+---
+
+## 16. 主题市场上下文（topics.json）
+
+`get_stock_snapshot` 解决"用户提到具体股票"的场景。但很多时候用户问的是**宏观或板块**：「最近港股有什么投资建议」、「黄金现在能买吗」、「煤炭板块还有机会吗」。这些问题里没有具体 ticker，但 agent 仍然需要知道**当前的市场环境**才能给出有依据的回答。
+
+### 16.1 双层召回设计
+
+```
+用户消息
+   │
+   ├── L1: 服务端关键词预扫描（web/chat.py 自动跑）
+   │     按 topics.json 里的关键词词典匹配 → 命中就预拉数据
+   │     结果以「市场环境」段拼到 system prompt 末尾
+   │     这层对 agent 透明 —— 它直接看到数据，不用调工具
+   │
+   └── L2: agent 主动调用 MCP 工具
+         get_market_context(topics=["hk","gold"])
+         CLI / Telegram 入口走这条；想补别的主题也可以再调
+```
+
+L1 是默认路径（web 用户感觉不到），L2 是兜底 + 主动召回。
+
+### 16.2 主题词典 `topics.json`
+
+项目根目录的 `topics.json` 定义两件事：
+
+**`topics`**：每个 topic id 映射到 keyword 列表 + 该主题要拉哪些 asset
+
+```json
+"hk": {
+  "label": "港股",
+  "keywords": ["港股", "恒生", "港交所", "h 股", "H 股", "港 A"],
+  "assets": ["HSI", "HSCEI", "HSTECH"]
+}
+```
+
+**`assets`**：每个 asset id 映射到取数方式 + Tencent 兜底
+
+```json
+"HSI": {
+  "name": "恒生指数",
+  "type": "ak_hk_index",
+  "primary": "HSI",
+  "backup_tencent": "hkHSI"
+}
+```
+
+### 16.3 内置主题（v1 覆盖）
+
+| 类别 | topics |
+|---|---|
+| 大盘指数 | `a-share` / `gem` / `star` / `bse` / `hk` / `us` |
+| 资产 | `gold` |
+| 行业 ETF | `industry-bank` · `industry-baijiu` · `industry-coal` · `industry-lithium` · `industry-semi` · `industry-ai` · `industry-new-energy` · `industry-military` · `industry-consumer` · `industry-real-estate` · `industry-resources` |
+
+**热修改**：直接编辑 `topics.json`，1 小时内自动 reload（或 `systemctl --user restart bigv-twins-web` 立即生效）。
+
+### 16.4 数据源（每个 asset 有 primary + Tencent 兜底）
+
+| type | 主源 | 给什么 | Tencent 兜底 |
+|---|---|---|---|
+| `ak_a_index` | akshare 新浪 `stock_zh_index_daily` | 1 月日线 K 线 → 1 周/1 月走势 | spot only |
+| `ak_hk_index` | akshare 东方财富 `stock_hk_index_daily_em` | 1 月日线 | spot only |
+| `ak_us_index` | akshare 新浪 `index_us_stock_sina` | 1 月日线 | — |
+| `tencent_quote` | Tencent `qt.gtimg.cn/q=` | real-time spot + 当日涨跌 | — |
+| `tencent_hf` | Tencent `qt.gtimg.cn/q=hf_*`（现货商品） | spot + 当日涨跌 | — |
+
+每个 asset 独立 try/except，单源失败不影响其他。10 分钟缓存。
+
+### 16.5 输出长这样
+
+agent 看到的 system prompt 末尾自动追加：
+
+```
+## 市场环境（系统已自动采集，回答时如用得上请自然引用）
+
+### 港股
+- **恒生指数** 现价 25640.08 · 近1周 今日 25640.08, 较昨日 -0.61%
+- **国企指数** 现价 8607.55 · 近1周 今日 8607.55, 较昨日 -0.38%
+- **恒生科技指数** 现价 4841.72 · 近1周 今日 4841.72, 较昨日 -0.32%
+```
+
+### 16.6 添加新 topic
+
+```bash
+# 1. 编辑 topics.json
+#    - "topics" 加新 topic id + keywords + assets 引用
+#    - "assets" 加对应 asset 定义（type/primary/backup_tencent）
+
+# 2. 立即生效（或等 1 小时自动 reload）
+ssh ... 'systemctl --user restart bigv-twins-web'
+```
+
+举例：加一个「白银」主题
+
+```json
+"silver": {
+  "label": "白银",
+  "keywords": ["白银", "银价"],
+  "assets": ["spot_silver"]
+},
+// 在 assets 里：
+"spot_silver": {
+  "name": "现货白银",
+  "type": "tencent_hf",
+  "primary": "hf_SI"
+}
+```
+
+### 16.7 调试
+
+```bash
+# 直接试 detect_topics + get_market_context
+python -c "
+from bigv_twins.market_data import detect_topics, get_market_context, format_market_context_for_prompt
+topics = detect_topics('港股最近怎么样')
+print('detected:', topics)
+print(format_market_context_for_prompt(get_market_context(topics)))
+"
+```
+
+### 16.8 已知限制
+
+- HK 指数 primary（akshare 东方财富 `stock_hk_index_daily_em`）经常 503，**已自动 fallback 到 Tencent**（只给 spot，无历史）。如果需要 HK 历史，可以扩展加第二条 fallback（雪球之类）
+- 行业 ETF 用的是 `tencent_quote`，**只有 spot 价**，没有 1 周/1 月历史。够用但不深；要历史的话可以改 type 为 `ak_a_share` 走新浪的 `stock_zh_a_daily`（部分 ETF 会失败，需测试）
+- topics.json 的关键词是简单 substring 匹配，不做分词，所以 "黄金时代" 也会触发 `gold`。粒度够用，需要更细可以引入 jieba
 
 ---
 

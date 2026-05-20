@@ -1,0 +1,124 @@
+{
+  "version": 1,
+  "_doc": "Topic-driven market context. Edit to add/remove topics or assets. Reloaded hourly.",
+
+  "topics": {
+    "a-share": {
+      "label": "A 股大盘",
+      "keywords": ["A 股", "A股", "上证", "沪指", "深证", "大盘", "沪深"],
+      "assets": ["sh000001", "sz399001", "sh000300", "sz399006"]
+    },
+    "gem": {
+      "label": "创业板",
+      "keywords": ["创业板"],
+      "assets": ["sz399006"]
+    },
+    "star": {
+      "label": "科创板",
+      "keywords": ["科创板", "科创 50"],
+      "assets": ["sh000688"]
+    },
+    "bse": {
+      "label": "北交所",
+      "keywords": ["北证", "北交所", "北证 50"],
+      "assets": ["sh000001"]
+    },
+    "hk": {
+      "label": "港股",
+      "keywords": ["港股", "恒生", "港交所", "h 股", "H 股", "港 A"],
+      "assets": ["HSI", "HSCEI", "HSTECH"]
+    },
+    "us": {
+      "label": "美股",
+      "keywords": ["美股", "纳斯达克", "纳指", "标普", "道琼斯", "美国股市"],
+      "assets": ["DJI", "IXIC", "INX"]
+    },
+    "gold": {
+      "label": "黄金",
+      "keywords": ["黄金", "金价", "金条", "金饰", "现货金"],
+      "assets": ["spot_gold", "etf_518880"]
+    },
+    "industry-bank": {
+      "label": "银行业",
+      "keywords": ["银行股", "银行业"],
+      "assets": ["etf_512800"]
+    },
+    "industry-baijiu": {
+      "label": "白酒",
+      "keywords": ["白酒"],
+      "assets": ["etf_161725"]
+    },
+    "industry-coal": {
+      "label": "煤炭",
+      "keywords": ["煤炭"],
+      "assets": ["etf_515220"]
+    },
+    "industry-lithium": {
+      "label": "锂电",
+      "keywords": ["锂电", "动力电池"],
+      "assets": ["etf_159800"]
+    },
+    "industry-semi": {
+      "label": "半导体",
+      "keywords": ["半导体", "芯片"],
+      "assets": ["etf_159995"]
+    },
+    "industry-ai": {
+      "label": "AI / 人工智能",
+      "keywords": ["AI", "人工智能", "大模型"],
+      "assets": ["etf_159819"]
+    },
+    "industry-new-energy": {
+      "label": "新能源",
+      "keywords": ["新能源车", "光伏", "储能", "新能源"],
+      "assets": ["etf_516160"]
+    },
+    "industry-military": {
+      "label": "军工",
+      "keywords": ["军工", "国防", "航天"],
+      "assets": ["etf_512810"]
+    },
+    "industry-consumer": {
+      "label": "消费",
+      "keywords": ["消费板块", "消费股"],
+      "assets": ["etf_159928"]
+    },
+    "industry-real-estate": {
+      "label": "地产",
+      "keywords": ["地产", "房地产", "楼市"],
+      "assets": ["etf_512200"]
+    },
+    "industry-resources": {
+      "label": "有色 / 资源",
+      "keywords": ["有色", "铜", "铝", "锌", "稀土"],
+      "assets": ["etf_512400"]
+    }
+  },
+
+  "assets": {
+    "sh000001": { "name": "上证综指",   "type": "ak_a_index",  "primary": "sh000001", "backup_tencent": "sh000001" },
+    "sz399001": { "name": "深证成指",   "type": "ak_a_index",  "primary": "sz399001", "backup_tencent": "sz399001" },
+    "sh000300": { "name": "沪深 300",   "type": "ak_a_index",  "primary": "sh000300", "backup_tencent": "sh000300" },
+    "sz399006": { "name": "创业板指",   "type": "ak_a_index",  "primary": "sz399006", "backup_tencent": "sz399006" },
+    "sh000688": { "name": "科创 50",    "type": "ak_a_index",  "primary": "sh000688", "backup_tencent": "sh000688" },
+    "HSI":      { "name": "恒生指数",   "type": "ak_hk_index", "primary": "HSI",     "backup_tencent": "hkHSI" },
+    "HSCEI":    { "name": "恒生国企指数","type": "ak_hk_index","primary": "HSCEI",   "backup_tencent": "hkHSCEI" },
+    "HSTECH":   { "name": "恒生科技指数","type": "ak_hk_index","primary": "HSTECH",  "backup_tencent": "hkHSTECH" },
+    "DJI":      { "name": "道琼斯",     "type": "ak_us_index", "primary": ".DJI" },
+    "IXIC":     { "name": "纳斯达克",   "type": "ak_us_index", "primary": ".IXIC" },
+    "INX":      { "name": "标普 500",   "type": "ak_us_index", "primary": ".INX" },
+    "spot_gold":{ "name": "现货黄金 (纽约)", "type": "tencent_hf", "primary": "hf_GC" },
+    "etf_518880": { "name": "黄金 ETF (518880)", "type": "tencent_quote", "primary": "sh518880" },
+    "etf_512800": { "name": "银行 ETF (512800)", "type": "tencent_quote", "primary": "sh512800" },
+    "etf_161725": { "name": "白酒 ETF (161725)", "type": "tencent_quote", "primary": "sz161725" },
+    "etf_515220": { "name": "煤炭 ETF (515220)", "type": "tencent_quote", "primary": "sh515220" },
+    "etf_159800": { "name": "锂电池 ETF (159800)", "type": "tencent_quote", "primary": "sz159800" },
+    "etf_159995": { "name": "芯片 ETF (159995)", "type": "tencent_quote", "primary": "sz159995" },
+    "etf_159819": { "name": "AI ETF (159819)", "type": "tencent_quote", "primary": "sz159819" },
+    "etf_516160": { "name": "新能源 ETF (516160)", "type": "tencent_quote", "primary": "sh516160" },
+    "etf_512810": { "name": "军工 ETF (512810)", "type": "tencent_quote", "primary": "sh512810" },
+    "etf_159928": { "name": "消费 ETF (159928)", "type": "tencent_quote", "primary": "sz159928" },
+    "etf_512200": { "name": "地产 ETF (512200)", "type": "tencent_quote", "primary": "sh512200" },
+    "etf_512400": { "name": "有色 ETF (512400)", "type": "tencent_quote", "primary": "sh512400" }
+  }
+}

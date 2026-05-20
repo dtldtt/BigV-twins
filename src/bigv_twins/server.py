@@ -16,6 +16,7 @@ from pydantic import Field
 
 from .chunk import html_to_text
 from .config import BLOGGERS, BY_SLUG, settings
+from .market_data import get_market_context as _get_market_context
 from .search import search as _search
 from .stock_data import get_stock_snapshot as _get_stock_snapshot
 
@@ -230,6 +231,30 @@ def get_persona(
         "available": True,
         "text": path.read_text(encoding="utf-8"),
     }
+
+
+@mcp.tool()
+def get_market_context(
+    topics: Annotated[
+        list[str],
+        Field(description="主题 id 列表（白名单见 topics.json），如 ['a-share', 'hk', 'gold', 'industry-coal']"),
+    ],
+) -> dict:
+    """获取若干主题的近期市场行情（1 周 + 1 月走势），用于宏观/板块/资产类讨论的背景参考。
+
+    支持的 topic id（见 topics.json，可热修改）：
+    - 大盘指数：`a-share` / `gem` / `star` / `bse` / `hk` / `us`
+    - 资产类：`gold`
+    - 行业 ETF：`industry-bank` / `industry-baijiu` / `industry-coal` / `industry-lithium`
+                 `industry-semi` / `industry-ai` / `industry-new-energy` / `industry-military`
+                 `industry-consumer` / `industry-real-estate` / `industry-resources`
+
+    每个 topic 返回若干 asset 的最近 1 周和 1 月走势（如有历史），或仅 real-time spot（如港股指数 backup 路径）。
+
+    注：web 入口已在 prompt 组装阶段对常见关键词（"港股"/"黄金"/"大盘"等）做了**预扫描自动召回**——
+    所以大多数情况你不需要主动调这个工具。**当用户提到新主题、或你判断需要补充另一个主题的背景时**才调。
+    """
+    return _get_market_context(topics)
 
 
 @mcp.tool()

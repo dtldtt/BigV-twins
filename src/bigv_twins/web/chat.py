@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from datetime import datetime, timezone
@@ -15,6 +16,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bigv_twins.config import BLOGGERS, BY_SLUG, Blogger
+from bigv_twins.market_data import (
+    detect_topics as md_detect,
+    format_market_context_for_prompt as md_format,
+    get_market_context as md_get,
+)
 
 from . import auth, db, openclaw_client
 from .db import BloggerOverride, Conversation, Message, User
@@ -57,19 +63,22 @@ def system_prompt_for(blogger: Blogger) -> str:
         "   **先**调 `bigv-twins.get_stock_snapshot`，参数 `{\"query\": <用户提到的股票>}`，"
         "拿当前 PE/PB/市值/控股结构/主营/大盘最近 10 天行情。这是真实数字，"
         "你的量化阈值（市值、PE、控股性质等）必须对照这些数字判断。\n"
+        "   **如果用户问的是宏观/板块/资产**（如港股/黄金/AI/煤炭/新能源等），"
+        "通常 system prompt 末尾已经自动附了「市场环境」段（系统帮你查了），"
+        "**不要重复调** `get_market_context`。如要补充另一个主题再调。\n"
         f"2. 调 `bigv-twins.get_persona`，参数 `{{\"blogger\": \"{blogger.slug}\"}}`，"
         "读你自己的风格画像——投资框架、关注领域、典型用词、口头禅。这就是「你的特征」。\n"
         f"3. 调 `bigv-twins.search`，参数 `{{\"blogger\": \"{blogger.slug}\", "
         "\"query\": <用户问题原文或改写>, \"top_k\": 5}}`，检索你过往说过的相关内容。\n\n"
         "## 回答结构\n\n"
-        "**如果调用了 get_stock_snapshot**，回答开头先给一段简短的"
-        "**「市场速览」**（≤ 5 行），列出关键基本面 + 大盘最近 10 天大致表现，"
-        "比如：\n\n"
-        "> 在回答之前，我先看了下数据：\n"
+        "**如果有任何已采集的数据**（system prompt 末尾的「市场环境」段，"
+        "或你调用 get_stock_snapshot / get_market_context 拿到的）：\n"
+        "回答开头先给一段简短的「**市场速览**」（≤ 6 行），把这些真实数字精炼出来，比如：\n\n"
+        "> 在回答之前我先看了下数据：\n"
         "> - 茅台 600519：现价 1324、PE 20、PB 6.1、市值 1.66 万亿、贵州省国资委控股 48.96%\n"
-        "> - 上证指数最近 10 天 4160 → 4170（基本走平，微涨）\n"
+        "> - 上证指数最近 10 天 4160→4170（微涨）；港股恒生最近 1 周 +1.2%\n"
         "\n"
-        "然后**再开始用第一人称回答**用户的问题，把基本面数字逐条对照你的方法论。\n\n"
+        "然后**再开始用第一人称回答**用户的问题，把这些数字逐条对照你的方法论。\n\n"
         "## 内容底线（不可妥协）\n\n"
         "- **只能基于检索片段 + get_stock_snapshot 的真实数字**说话。\n"
         "- **每个观点必须能溯源到原文**（用自然方式带链接）：\n"
@@ -239,7 +248,21 @@ async def ask(
         )
         history = list(msg_rows.scalars())
 
-        messages = [{"role": "system", "content": system_prompt_for(blogger)}]
+        # Auto-detect macro topics in the new user message → fetch context →
+        # append to system prompt so agent has it without needing a tool call.
+        sys_prompt = system_prompt_for(blogger)
+        detected = md_detect(user_text)
+        if detected:
+            log.info("auto-detected market topics for cid=%s: %s", cid, detected)
+            try:
+                ctx = await asyncio.to_thread(md_get, detected)
+                block = md_format(ctx)
+                if block:
+                    sys_prompt = sys_prompt + "\n\n" + block
+            except Exception:
+                log.exception("market_data fetch failed; continuing without context")
+
+        messages = [{"role": "system", "content": sys_prompt}]
         for m in history:
             messages.append({"role": m.role, "content": m.content})
         messages.append({"role": "user", "content": user_text})
