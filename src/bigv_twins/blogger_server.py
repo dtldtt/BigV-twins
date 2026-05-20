@@ -26,14 +26,21 @@ log = logging.getLogger("bigv_twins.blogger_server")
 mcp = FastMCP(
     "bigv-blogger",
     instructions=(
-        "Per-blogger retrieval over the curated Zhihu archive. Five tools: "
-        "`list_bloggers` enumerates known slugs; `search` does semantic retrieval "
-        "of a blogger's stance on a topic; `get_recent` lists their N latest posts; "
-        "`get_post` fetches the full cleaned text of one post by zhihu_id; "
-        "`get_persona` returns the blogger's style summary (also exposed as a "
-        "resource at persona://blogger/{slug}). "
-        "These tools are for AGENTS that role-play one of the archived bloggers. "
-        "Generic AI advisors should NOT call them."
+        "Per-blogger retrieval over the curated Zhihu archive. These tools are for "
+        "AGENTS that role-play one of the archived bloggers. Generic AI advisors "
+        "should NOT call them.\n\n"
+        "Tool selection by question shape:\n"
+        "- 「X 怎么看 Y / X 对 Y 的观点」  → `search(blogger=X, query=Y)`\n"
+        "- 「X 最近在聊什么 / X 这周说过什么」 → `get_recent(blogger=X, n=10)` (NOT search)\n"
+        "- 「X 和 Y 对 Z 的看法有什么不同」 → 分别 `search(X, Z)` + `search(Y, Z)` "
+        "(or `search_multi_query` if you need many sub-queries on one blogger)\n"
+        "- 「X 在《XX 文章》里说了什么」 → `get_recent` to find zhihu_id, then `get_post`\n\n"
+        "Retry / fallback rules (Agentic):\n"
+        "- If `search` returns 0 hits OR top distance > 1.3 (low relevance): rephrase the\n"
+        "  query (synonyms / shorter / domain term) and search ONE more time.\n"
+        "- If both searches still come up empty: tell the user honestly the blogger has\n"
+        "  not specifically discussed this — DO NOT make up an answer.\n"
+        "- Hard cap: ≤ 3 retrieval calls per user turn. More than that wastes tokens."
     ),
     host=settings.mcp_host,
     port=settings.mcp_blogger_port,
@@ -99,15 +106,84 @@ def search(
 ) -> list[dict]:
     """Semantic search over a blogger's archived Zhihu content.
 
-    Returns the most relevant chunks ranked by cosine distance, each with original
-    URL, voteup count, date, content_type, and title (when available). Use this
-    every time the user asks for a specific blogger's view, opinion, or framework.
+    Returns the most relevant chunks ranked by cosine distance (lower = closer),
+    each with original URL, voteup count, date, content_type, and title.
+
+    When to use:
+    - **Topical questions** about the blogger's view / framework / opinion on
+      something they may have written about ("X 怎么看 Y", "X 的方法论是什么")
+
+    Reading the result quality (gating signal):
+    - `distance < 0.9`  → very relevant, can cite directly
+    - `distance ~ 0.9-1.2` → topical match, usable
+    - `distance > 1.3`  → low relevance; **rephrase and try once more** before giving up
+    - empty result      → same — try a synonym or shorter query
+
+    Anti-patterns (DO NOT):
+    - Don't call `search` for time-based questions ("最近", "这周", "今年")—use
+      `get_recent` instead.
+    - Don't call `search` ≥ 3 times in one turn—either the blogger hasn't covered
+      this, or your query terms are off. Tell the user honestly.
+    - Don't fabricate citations. If `search` didn't return a chunk, you can't cite it.
     """
     _validate_blogger(blogger)
     if content_type and content_type not in {"answer", "article", "pin"}:
         raise ValueError("content_type must be one of: answer | article | pin (or omit)")
     hits = _search(blogger, query, top_k=top_k, content_type=content_type)
     return [h.to_dict() for h in hits]
+
+
+@mcp.tool()
+def search_multi_query(
+    blogger: Annotated[str, Field(description="Blogger slug.")],
+    queries: Annotated[
+        list[str],
+        Field(description="2-5 related sub-queries / synonyms / aspects of the same question."),
+    ],
+    top_k_each: Annotated[int, Field(ge=1, le=10)] = 3,
+    content_type: Annotated[
+        str | None,
+        Field(description="Filter to one of: answer | article | pin"),
+    ] = None,
+) -> list[dict]:
+    """Parallel multi-query search with dedup. Use when ONE search isn't enough.
+
+    Each query searches independently for `top_k_each` hits; results are merged
+    and deduped by `chunk_id` (best distance kept), sorted by ascending distance.
+
+    When to use:
+    - **Decomposable** questions: "X 对 AI 算力 + 半导体 + 设备的看法"
+      → queries=["AI 算力", "半导体", "设备投资"]
+    - **Synonym-heavy** topics: "X 怎么看人形机器人"
+      → queries=["人形机器人", "具身智能", "机器人产业链"]
+    - **Different angles** of one question: "X 对煤炭的逻辑"
+      → queries=["煤炭股", "高股息煤炭", "煤价周期"]
+
+    DO NOT use as a generic "search harder" — it's for genuinely multi-faceted
+    questions. For unrelated topics, do separate `search` calls.
+
+    Hard cap: max 5 sub-queries per call (more = diminishing returns).
+    """
+    _validate_blogger(blogger)
+    if content_type and content_type not in {"answer", "article", "pin"}:
+        raise ValueError("content_type must be one of: answer | article | pin (or omit)")
+    if not queries:
+        return []
+    if len(queries) > 5:
+        raise ValueError("max 5 sub-queries per multi-query call")
+
+    seen: dict[int, dict] = {}
+    for q in queries:
+        if not q.strip():
+            continue
+        for hit in _search(blogger, q, top_k=top_k_each, content_type=content_type):
+            d = hit.to_dict()
+            cid = d["chunk_id"]
+            if cid not in seen or d["distance"] < seen[cid]["distance"]:
+                seen[cid] = d
+    merged = list(seen.values())
+    merged.sort(key=lambda h: h["distance"])
+    return merged
 
 
 @mcp.tool()
@@ -119,7 +195,15 @@ def get_recent(
         Field(description="Filter to one of: answer | article | pin"),
     ] = None,
 ) -> list[dict]:
-    """Return the N most recent posts for a blogger, ordered by created_time descending."""
+    """Return the N most recent posts for a blogger, ordered by created_time descending.
+
+    Use this — NOT `search` — for any time-anchored question:
+    - 「X 最近怎么看 …」, 「X 这两周聊了什么」, 「X 今年说过 …」
+    - 「X 最近一段时间的关注点」
+
+    Returns excerpt only (not full text); pair with `get_post` to drill into a
+    specific zhihu_id when one excerpt looks promising.
+    """
     _validate_blogger(blogger)
     if content_type and content_type not in {"answer", "article", "pin"}:
         raise ValueError("content_type must be one of: answer | article | pin (or omit)")
