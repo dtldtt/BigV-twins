@@ -39,9 +39,20 @@ async def hidden_slugs(session: AsyncSession) -> set[str]:
     return {r[0] for r in result.all()}
 
 
+def _ordered(bloggers: list[Blogger]) -> list[Blogger]:
+    """Display order: real bloggers first (in config order), advisors always last.
+
+    Defensive — if a 6th / 7th blogger is added later, advisor stays pinned to
+    the bottom of the /chat grid. Stable within each group.
+    """
+    bs = [b for b in bloggers if not b.is_advisor]
+    advs = [b for b in bloggers if b.is_advisor]
+    return bs + advs
+
+
 async def visible_bloggers(session: AsyncSession) -> list[Blogger]:
     hidden = await hidden_slugs(session)
-    return [b for b in BLOGGERS if b.slug not in hidden]
+    return _ordered([b for b in BLOGGERS if b.slug not in hidden])
 
 
 async def assert_visible(session: AsyncSession, slug: str) -> Blogger:
@@ -175,7 +186,7 @@ async def chat_home(
     session: Annotated[AsyncSession, Depends(db.get_session)],
 ):
     hidden = await hidden_slugs(session)
-    bloggers = [b for b in BLOGGERS if b.slug not in hidden]
+    bloggers = _ordered([b for b in BLOGGERS if b.slug not in hidden])
     recent_all = await list_user_conversations(session, user.id, limit=50)
     recent = [c for c in recent_all if c.blogger_slug not in hidden][:15]
     return templates.TemplateResponse(

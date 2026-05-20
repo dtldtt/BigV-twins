@@ -28,25 +28,29 @@ else
 fi
 echo "Using openclaw binary: $OC"
 
-# ------------------------------------------------------------ bigv
-BIGV_WS="$OPENCLAW_DIR/workspace-bigv"
-echo "==> Provisioning bigv agent (workspace: $BIGV_WS)"
-"$OC" agents add bigv --workspace "$BIGV_WS" --non-interactive || true
+install_workspace() {
+  local agent="$1" ws="$2"
+  echo "==> Provisioning $agent agent (workspace: $ws)"
+  "$OC" agents add "$agent" --workspace "$ws" --non-interactive || true
 
-cp "$PROJECT_ROOT/openclaw/agents/bigv/IDENTITY.md" "$BIGV_WS/IDENTITY.md"
-cp "$PROJECT_ROOT/openclaw/agents/bigv/SOUL.md"     "$BIGV_WS/SOUL.md"
-cp "$PROJECT_ROOT/openclaw/agents/bigv/AGENTS.md"   "$BIGV_WS/AGENTS.md"
-echo "    bigv IDENTITY/SOUL/AGENTS installed."
+  # Copy our authoritative IDENTITY/SOUL/AGENTS/USER markdown
+  cp "$PROJECT_ROOT/openclaw/agents/$agent/IDENTITY.md" "$ws/IDENTITY.md"
+  cp "$PROJECT_ROOT/openclaw/agents/$agent/SOUL.md"     "$ws/SOUL.md"
+  cp "$PROJECT_ROOT/openclaw/agents/$agent/AGENTS.md"   "$ws/AGENTS.md"
+  cp "$PROJECT_ROOT/openclaw/agents/$agent/USER.md"     "$ws/USER.md"
 
-# ------------------------------------------------------------ advisor
-ADV_WS="$OPENCLAW_DIR/workspace-advisor"
-echo "==> Provisioning advisor agent (workspace: $ADV_WS)"
-"$OC" agents add advisor --workspace "$ADV_WS" --non-interactive || true
+  # Delete OpenClaw's default BOOTSTRAP.md — its first-run script tells the agent
+  # to ask the user for a name / vibe / emoji, which conflicts with role-play /
+  # advisor flows. We never want that conversation.
+  rm -f "$ws/BOOTSTRAP.md"
 
-cp "$PROJECT_ROOT/openclaw/agents/advisor/IDENTITY.md" "$ADV_WS/IDENTITY.md"
-cp "$PROJECT_ROOT/openclaw/agents/advisor/SOUL.md"     "$ADV_WS/SOUL.md"
-cp "$PROJECT_ROOT/openclaw/agents/advisor/AGENTS.md"   "$ADV_WS/AGENTS.md"
-echo "    advisor IDENTITY/SOUL/AGENTS installed."
+  # HEARTBEAT.md ships as a noop template; leave it alone (no harm).
+
+  echo "    $agent IDENTITY/SOUL/AGENTS/USER installed; BOOTSTRAP.md deleted."
+}
+
+install_workspace bigv    "$OPENCLAW_DIR/workspace-bigv"
+install_workspace advisor "$OPENCLAW_DIR/workspace-advisor"
 
 # ------------------------------------------------------------ skills (advisor needs agent-browser)
 ADV_SKILLS="$ADV_WS/skills"

@@ -187,8 +187,10 @@ def _tencent_fetch(symbol: str) -> dict:
         "low_today": f(34, float),
         "turnover_rate": f(38, float),
         "pe_ttm": f(39, float),
-        "high_52w": f(41, float),
-        "low_52w": f(42, float),
+        # NOTE: fields 41/42 are NOT 52-week hi/lo — they duplicate today's
+        # high/low (or a recent-window range). Tencent qt.gtimg has no real
+        # 52w field exposed here. We compute the actual 52w hi/lo from akshare
+        # daily history in `_one_year_stats()`.
         "amplitude": f(43, float),
         "circulating_mc_yi": f(44, float),
         "total_mc_yi": f(45, float),
@@ -224,18 +226,42 @@ def _xq_basic_info(xq_symbol: str) -> dict:
     return {}
 
 
-def _one_year_change_pct(symbol: str) -> Optional[float]:
+def _one_year_stats(symbol: str) -> dict:
+    """Pull last ~252 trading days from akshare and derive:
+       - 1y price change pct (current vs ~252 days ago, qfq-adjusted)
+       - 52w high / low (max/min of high/low columns over the window)
+
+    Returns {} on failure. Single network call covers both, so we do it once.
+    """
     try:
         import akshare as ak
         df = ak.stock_zh_a_daily(symbol=symbol, adjust="qfq")
-        if df is None or len(df) < 252:
-            return None
-        current = float(df.iloc[-1]["close"])
-        year_ago = float(df.iloc[-252]["close"])
-        return round((current / year_ago - 1) * 100, 1)
+        if df is None or len(df) < 30:
+            return {}
+        # 52w window: last 252 trading days (or whatever we have if <252)
+        win = df.tail(252)
+        out: dict = {}
+        try:
+            out["high_52w"] = round(float(win["high"].max()), 2)
+            out["low_52w"] = round(float(win["low"].min()), 2)
+        except Exception:
+            pass
+        if len(df) >= 252:
+            try:
+                current = float(df.iloc[-1]["close"])
+                year_ago = float(df.iloc[-252]["close"])
+                out["change_1y_pct"] = round((current / year_ago - 1) * 100, 1)
+            except Exception:
+                pass
+        return out
     except Exception as e:
-        log.warning("1y change failed for %s: %s", symbol, e)
-        return None
+        log.warning("1y stats failed for %s: %s", symbol, e)
+        return {}
+
+
+def _one_year_change_pct(symbol: str) -> Optional[float]:
+    """Back-compat shim — prefer _one_year_stats() which returns 52w hi/lo too."""
+    return _one_year_stats(symbol).get("change_1y_pct")
 
 
 def _index_recent_10d(symbol: str, label: str) -> dict:
@@ -310,8 +336,8 @@ def get_stock_snapshot(query: str) -> dict:
         result["price"] = {
             "current": tc.get("current"),
             "change_today_pct": tc.get("change_pct"),
-            "high_52w": tc.get("high_52w"),
-            "low_52w": tc.get("low_52w"),
+            "high_today": tc.get("high_today"),
+            "low_today": tc.get("low_today"),
         }
         result["valuation"] = {
             "pe_ttm": tc.get("pe_ttm"),
@@ -324,10 +350,14 @@ def get_stock_snapshot(query: str) -> dict:
 
     # A-share specific enrichment
     if info.market == "a-share":
-        # 2. 1y price change (新浪 K-line)
-        y1 = _one_year_change_pct(info.tencent_symbol)
-        if y1 is not None:
-            result.setdefault("price", {})["change_1y_pct"] = y1
+        # 2. 1y stats (52w hi/lo + 1y change pct from 新浪 K-line, single call)
+        ystats = _one_year_stats(info.tencent_symbol)
+        if "change_1y_pct" in ystats:
+            result.setdefault("price", {})["change_1y_pct"] = ystats["change_1y_pct"]
+        if "high_52w" in ystats:
+            result.setdefault("price", {})["high_52w"] = ystats["high_52w"]
+        if "low_52w" in ystats:
+            result.setdefault("price", {})["low_52w"] = ystats["low_52w"]
 
         # 3. 同花顺 主营业务
         zy = _ths_main_business(info.code)
