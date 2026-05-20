@@ -1,8 +1,11 @@
-"""FastMCP server exposing per-blogger retrieval tools for BigV-twins.
+"""FastMCP server: 博主语料工具 (search / persona / recent / post / list).
 
-This server does NOT call any LLM. It only retrieves and formats data from the
-read-only Zhihu archive plus per-blogger sqlite-vec indices. The agent on the
-OpenClaw side does generation.
+This is one of the two BigV-twins MCP servers. The other is `market_server.py`
+which hosts stock / index data tools. Splitting them lets us register them
+separately in OpenClaw so the `advisor` agent only sees market data and can't
+peek into blogger archives.
+
+Listens on `MCP_BLOGGER_PORT` (default 8770).
 """
 
 from __future__ import annotations
@@ -16,27 +19,24 @@ from pydantic import Field
 
 from .chunk import html_to_text
 from .config import BLOGGERS, BY_SLUG, settings
-from .market_data import get_market_context as _get_market_context
 from .search import search as _search
-from .stock_data import get_stock_snapshot as _get_stock_snapshot
 
-log = logging.getLogger("bigv_twins.server")
+log = logging.getLogger("bigv_twins.blogger_server")
 
 mcp = FastMCP(
-    "bigv-twins",
+    "bigv-blogger",
     instructions=(
-        "Per-blogger retrieval over a curated Zhihu archive of investment writers. "
-        "Use `list_bloggers` to see what slugs exist, `search` for semantic retrieval "
-        "of a blogger's stance on a topic, `get_recent` for recent posts, and `get_post` "
-        "to fetch the full cleaned text of a specific post by its zhihu_id. "
-        "Use `get_persona` (or the persona://blogger/{slug} resource) for the blogger's "
-        "style summary. "
-        "Use `get_stock_snapshot` when the user asks about a specific stock — it "
-        "returns valuation / market cap / ownership / sector / index context, which "
-        "lets the blogger apply their quantitative framework to concrete numbers."
+        "Per-blogger retrieval over the curated Zhihu archive. Five tools: "
+        "`list_bloggers` enumerates known slugs; `search` does semantic retrieval "
+        "of a blogger's stance on a topic; `get_recent` lists their N latest posts; "
+        "`get_post` fetches the full cleaned text of one post by zhihu_id; "
+        "`get_persona` returns the blogger's style summary (also exposed as a "
+        "resource at persona://blogger/{slug}). "
+        "These tools are for AGENTS that role-play one of the archived bloggers. "
+        "Generic AI advisors should NOT call them."
     ),
     host=settings.mcp_host,
-    port=settings.mcp_port,
+    port=settings.mcp_blogger_port,
 )
 
 
@@ -71,7 +71,7 @@ def list_bloggers() -> list[dict]:
                     "slug": b.slug,
                     "name": b.name,
                     "url_token": b.url_token,
-                    "zhihu_url": f"https://www.zhihu.com/people/{b.url_token}",
+                    "zhihu_url": f"https://www.zhihu.com/people/{b.url_token}" if b.url_token else None,
                     "headline": row["headline"] if row else None,
                     "follower_count": row["follower_count"] if row else None,
                     "answer_count": row["answer_count"] if row else None,
@@ -97,8 +97,7 @@ def search(
         Field(description="Filter to one of: answer | article | pin"),
     ] = None,
 ) -> list[dict]:
-    """
-    Semantic search over a blogger's archived Zhihu content.
+    """Semantic search over a blogger's archived Zhihu content.
 
     Returns the most relevant chunks ranked by cosine distance, each with original
     URL, voteup count, date, content_type, and title (when available). Use this
@@ -120,12 +119,7 @@ def get_recent(
         Field(description="Filter to one of: answer | article | pin"),
     ] = None,
 ) -> list[dict]:
-    """
-    Return the N most recent posts for a blogger, ordered by created_time descending.
-
-    Use when the user asks 'what is X talking about lately' or 'X recent views on Y'.
-    Returns metadata + excerpt only (use get_post to fetch full text).
-    """
+    """Return the N most recent posts for a blogger, ordered by created_time descending."""
     _validate_blogger(blogger)
     if content_type and content_type not in {"answer", "article", "pin"}:
         raise ValueError("content_type must be one of: answer | article | pin (or omit)")
@@ -144,20 +138,7 @@ def get_recent(
         sql += " ORDER BY created_time DESC LIMIT ?"
         params.append(n)
         rows = src.execute(sql, params).fetchall()
-        return [
-            {
-                "zhihu_id": r["zhihu_id"],
-                "content_type": r["content_type"],
-                "title": r["title"],
-                "excerpt": r["excerpt"],
-                "voteup_count": r["voteup_count"],
-                "comment_count": r["comment_count"],
-                "url": r["url"],
-                "column_title": r["column_title"],
-                "created_time": r["created_time"],
-            }
-            for r in rows
-        ]
+        return [dict(r) for r in rows]
     finally:
         src.close()
 
@@ -165,16 +146,9 @@ def get_recent(
 @mcp.tool()
 def get_post(
     blogger: Annotated[str, Field(description="Blogger slug.")],
-    zhihu_id: Annotated[
-        str, Field(description="zhihu_id returned by search() or get_recent().")
-    ],
+    zhihu_id: Annotated[str, Field(description="zhihu_id from search() or get_recent().")],
 ) -> dict:
-    """
-    Fetch the full cleaned text of one post.
-
-    Use when search results suggest the right post but you need the full text to
-    reason about edge cases or quote precisely.
-    """
+    """Fetch the full cleaned text of one post."""
     _validate_blogger(blogger)
     b = BY_SLUG[blogger]
     src = _open_zhihu_ro()
@@ -186,9 +160,7 @@ def get_post(
             (b.author_id, zhihu_id),
         ).fetchone()
         if not row:
-            raise ValueError(
-                f"post not found: blogger={blogger!r}, zhihu_id={zhihu_id!r}"
-            )
+            raise ValueError(f"post not found: blogger={blogger!r}, zhihu_id={zhihu_id!r}")
         return {
             "zhihu_id": row["zhihu_id"],
             "content_type": row["content_type"],
@@ -209,81 +181,18 @@ def get_post(
 def get_persona(
     blogger: Annotated[str, Field(description="Blogger slug.")],
 ) -> dict:
-    """
-    Return the blogger's persona summary (style, focus, methodology).
-
-    If the persona file has not been written yet, returns a placeholder asking the
-    caller to ground answers in search/get_recent results.
-    """
+    """Return the blogger's persona summary (style, focus, methodology)."""
     _validate_blogger(blogger)
     path = settings.persona_path(blogger)
     if not path.exists():
         return {
-            "slug": blogger,
-            "available": False,
+            "slug": blogger, "available": False,
             "text": (
                 f"(Persona for {blogger} has not been written yet. "
                 "Ground answers in search() / get_recent() results.)"
             ),
         }
-    return {
-        "slug": blogger,
-        "available": True,
-        "text": path.read_text(encoding="utf-8"),
-    }
-
-
-@mcp.tool()
-def get_market_context(
-    topics: Annotated[
-        list[str],
-        Field(description="主题 id 列表（白名单见 topics.json），如 ['a-share', 'hk', 'gold', 'industry-coal']"),
-    ],
-) -> dict:
-    """获取若干主题的近期市场行情（1 周 + 1 月走势），用于宏观/板块/资产类讨论的背景参考。
-
-    支持的 topic id（见 topics.json，可热修改）：
-    - 大盘指数：`a-share` / `gem` / `star` / `bse` / `hk` / `us`
-    - 资产类：`gold`
-    - 行业 ETF：`industry-bank` / `industry-baijiu` / `industry-coal` / `industry-lithium`
-                 `industry-semi` / `industry-ai` / `industry-new-energy` / `industry-military`
-                 `industry-consumer` / `industry-real-estate` / `industry-resources`
-
-    每个 topic 返回若干 asset 的最近 1 周和 1 月走势（如有历史），或仅 real-time spot（如港股指数 backup 路径）。
-
-    注：web 入口已在 prompt 组装阶段对常见关键词（"港股"/"黄金"/"大盘"等）做了**预扫描自动召回**——
-    所以大多数情况你不需要主动调这个工具。**当用户提到新主题、或你判断需要补充另一个主题的背景时**才调。
-    """
-    return _get_market_context(topics)
-
-
-@mcp.tool()
-def get_stock_snapshot(
-    query: Annotated[
-        str,
-        Field(description="股票代码 (如 600519/300750/688981/00700) 或常见股票名 (如 茅台/宁德时代/腾讯)"),
-    ],
-) -> dict:
-    """获取股票的基本面快照 + 大盘环境，用于辅助博主分析具体标的。
-
-    返回内容（best-effort，部分字段在某些股票上可能缺失）：
-    - resolved: 解析后的代码、名称、市场、板块（主板/创业板/科创板/北交所/港股）
-    - price: 现价 / 当日涨跌% / 52周高低 / 最近 1 年涨跌%
-    - valuation: PE_TTM / PB
-    - scale: 总市值（亿，显示形式如「1.93 万亿」）
-    - ownership: 控股性质（央企控股/省属国资控股/民营企业/外资企业...）+ 实际控制人
-    - business: 行业 + 主营业务文字描述
-    - company: 公司全名 / 董事长 / 员工数
-    - index_context: 上证指数最近 10 天；如果是创业板再附创业板指；科创板再附科创50
-
-    **务必**在用户问到具体股票/标的时**先**调用此工具拿到真实数字，
-    然后再调 search/get_persona——这样博主才能把自己的量化阈值
-    （如「市值 < 200 亿」「PE < 30」「央企控股」等）跟股票的真实数字逐条对照。
-
-    数据源（按可靠性）：Tencent 实时报价 → 同花顺主营业务 → 雪球控股结构 → 新浪 K 线。
-    缓存 10 分钟，重复查询同一股票不再请求外部 API。
-    """
-    return _get_stock_snapshot(query)
+    return {"slug": blogger, "available": True, "text": path.read_text(encoding="utf-8")}
 
 
 @mcp.resource("persona://blogger/{slug}")
@@ -303,9 +212,8 @@ def main() -> None:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     log.info(
-        "starting BigV-twins MCP server on %s:%d (streamable-http)",
-        settings.mcp_host,
-        settings.mcp_port,
+        "starting BigV-twins BLOGGER MCP server on %s:%d (streamable-http)",
+        settings.mcp_host, settings.mcp_blogger_port,
     )
     mcp.run(transport="streamable-http")
 

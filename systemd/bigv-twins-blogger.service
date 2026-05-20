@@ -1,0 +1,16 @@
+[Unit]
+Description=BigV-twins BLOGGER MCP server (search / persona / recent / post / list)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/dtl/projects/BigV-twins
+ExecStart=/home/dtl/miniconda3/envs/bigv-twins/bin/python -m bigv_twins.blogger_server
+Restart=on-failure
+RestartSec=5s
+StandardOutput=append:/home/dtl/projects/BigV-twins/logs/mcp_blogger.log
+StandardError=append:/home/dtl/projects/BigV-twins/logs/mcp_blogger.log
+
+[Install]
+WantedBy=default.target

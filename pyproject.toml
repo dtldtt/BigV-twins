@@ -27,7 +27,8 @@ dependencies = [
 ]
 
 [project.scripts]
-bigv-twins-server = "bigv_twins.server:main"
+bigv-twins-blogger-server = "bigv_twins.blogger_server:main"
+bigv-twins-market-server = "bigv_twins.market_server:main"
 bigv-twins-index = "bigv_twins.index:main"
 bigv-twins-web = "bigv_twins.web.app:main"
 bigv-twins-web-bootstrap = "bigv_twins.web.bootstrap:main"

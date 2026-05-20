@@ -9,11 +9,23 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 @dataclass(frozen=True)
 class Blogger:
+    """A "Blogger" entry in bloggers.json.
+
+    For real archived Zhihu bloggers (kind='blogger'):
+      author_id, url_token, name, tagline are all populated.
+      `agent` should be "bigv".
+
+    For the synthetic "AI 投资顾问" (kind='advisor'):
+      author_id=-1, url_token="" and only name/tagline are meaningful.
+      `agent` should be "advisor".
+    """
     slug: str
-    author_id: int
-    url_token: str
     name: str
-    tagline: str = ""           # one-line投资风格摘要; can be empty
+    author_id: int = -1
+    url_token: str = ""
+    tagline: str = ""
+    kind: str = "blogger"     # "blogger" | "advisor"
+    agent: str = "bigv"       # which OpenClaw agent to route to (openclaw/<agent>)
 
     @property
     def db_filename(self) -> str:
@@ -23,6 +35,14 @@ class Blogger:
     def persona_filename(self) -> str:
         return f"{self.slug}.md"
 
+    @property
+    def is_advisor(self) -> bool:
+        return self.kind == "advisor"
+
+    @property
+    def is_blogger(self) -> bool:
+        return self.kind == "blogger"
+
 
 # Project root: src/bigv_twins/config.py -> ../../../
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -30,15 +50,10 @@ _BLOGGERS_JSON = _PROJECT_ROOT / "bloggers.json"
 
 
 def _load_bloggers() -> tuple[Blogger, ...]:
-    """Read bloggers from bloggers.json (canonical source of truth).
-
-    Falls back to a built-in hardcoded list if the file is missing so the
-    package still imports cleanly during dev / installs.
-    """
+    """Read bloggers from bloggers.json (canonical source of truth)."""
     if _BLOGGERS_JSON.exists():
         data = json.loads(_BLOGGERS_JSON.read_text(encoding="utf-8"))
         return tuple(Blogger(**b) for b in data)
-    # Built-in fallback (matches the four bloggers shipped with v0):
     return (
         Blogger(slug="mr-dang", author_id=1, url_token="mr-dang-77",       name="MR Dang"),
         Blogger(slug="eyu",     author_id=2, url_token="chen-ze-xin-49-22", name="寒武纪的鳄鱼"),
@@ -49,7 +64,7 @@ def _load_bloggers() -> tuple[Blogger, ...]:
 
 BLOGGERS: tuple[Blogger, ...] = _load_bloggers()
 BY_SLUG: dict[str, Blogger] = {b.slug: b for b in BLOGGERS}
-BY_AUTHOR_ID: dict[int, Blogger] = {b.author_id: b for b in BLOGGERS}
+BY_AUTHOR_ID: dict[int, Blogger] = {b.author_id: b for b in BLOGGERS if b.author_id > 0}
 
 
 class Settings(BaseSettings):
@@ -70,9 +85,11 @@ class Settings(BaseSettings):
     chunk_size: int = 600
     chunk_overlap: int = 80
 
-    # MCP server
+    # MCP servers (now split into two; keep mcp_port for back-compat read)
     mcp_host: str = "127.0.0.1"
-    mcp_port: int = 8770
+    mcp_blogger_port: int = 8770   # blogger-corpus tools (search / persona / recent / post)
+    mcp_market_port: int = 8771    # market data tools (stock_snapshot / market_context)
+    mcp_port: int = 8770           # deprecated alias = mcp_blogger_port
 
     # Web chat app
     web_host: str = "127.0.0.1"

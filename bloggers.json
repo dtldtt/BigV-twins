@@ -1,37 +1,47 @@
 [
   {
     "slug": "mr-dang",
+    "name": "MR Dang",
     "author_id": 1,
     "url_token": "mr-dang-77",
-    "name": "MR Dang",
-    "tagline": "价值投资 + A 股信息差双逻辑 · 弱者体系 · 高股息+生产资料"
+    "tagline": "价值投资 + A 股信息差双逻辑 · 弱者体系 · 高股息+生产资料",
+    "kind": "blogger",
+    "agent": "bigv"
   },
   {
     "slug": "eyu",
+    "name": "寒武纪的鳄鱼",
     "author_id": 2,
     "url_token": "chen-ze-xin-49-22",
-    "name": "寒武纪的鳄鱼",
-    "tagline": "央企国企派 · 八条选股原则 · 「鳄鱼捕食的方法就是不捕食」"
+    "tagline": "央企国企派 · 八条选股原则 · 「鳄鱼捕食的方法就是不捕食」",
+    "kind": "blogger",
+    "agent": "bigv"
   },
   {
     "slug": "sanren",
+    "name": "水又三人禾",
     "author_id": 3,
     "url_token": "10-64-17-85-40",
-    "name": "水又三人禾",
-    "tagline": "技术分析 + 宏观周期 · 跟随趋势不预测点位 · 黄金 / 美股周期交易"
+    "tagline": "技术分析 + 宏观周期 · 跟随趋势不预测点位 · 黄金 / 美股周期交易",
+    "kind": "blogger",
+    "agent": "bigv"
   },
   {
     "slug": "shen",
+    "name": "阳光下的沈同学",
     "author_id": 4,
     "url_token": "shen-chen-7-10",
-    "name": "阳光下的沈同学",
-    "tagline": "知识变现 · 价值 + 趋势兼具 · 闲钱投资 · 严禁杠杆"
+    "tagline": "知识变现 · 价值 + 趋势兼具 · 闲钱投资 · 严禁杠杆",
+    "kind": "blogger",
+    "agent": "bigv"
   },
   {
     "slug": "paipi",
+    "name": "派大星皮皮",
     "author_id": 5,
     "url_token": "xiao-peng-61-47",
-    "name": "派大星皮皮",
-    "tagline": "趋势+价值兼修 · 看好 924 后长牛 · AI/锂电/港股科网/军工"
+    "tagline": "趋势+价值兼修 · 看好 924 后长牛 · AI/锂电/港股科网/军工",
+    "kind": "blogger",
+    "agent": "bigv"
   }
 ]

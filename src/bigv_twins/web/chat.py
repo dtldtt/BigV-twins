@@ -269,6 +269,10 @@ async def ask(
             messages.append({"role": m.role, "content": m.content})
         messages.append({"role": "user", "content": user_text})
 
+        # Route to per-blogger OpenClaw agent (default "bigv" for archived bloggers,
+        # "advisor" for the AI advisor card; configured via bloggers.json).
+        target_model = f"openclaw/{blogger.agent}"
+
         # Persist user msg + maybe set title before streaming starts
         session.add(Message(conversation_id=cid, role="user", content=user_text))
         if conv.title == "(新对话)":
@@ -280,7 +284,7 @@ async def ask(
         buf: list[str] = []
         try:
             try:
-                async for delta in openclaw_client.stream_chat(messages):
+                async for delta in openclaw_client.stream_chat(messages, model=target_model):
                     buf.append(delta)
                     yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
             except Exception as exc:
