@@ -129,6 +129,7 @@ BigV-twins/
 │   ├── search.py                   (sqlite-vec 检索；CLI: python -m bigv_twins.search)
 │   ├── server.py                   (FastMCP server；CLI: python -m bigv_twins.server)
 │   ├── stock_data.py               (股票快照：Tencent + akshare 多源组合；见 §15)
+│   ├── market_data.py              (主题市场上下文 + topics.json 加载；见 §16)
 │   └── web/                        ← 赛博大V Web UI（FastAPI；见 §14）
 │       ├── app.py / db.py / auth.py / auth_routes.py / invites.py
 │       ├── chat.py / admin.py / about.py / openclaw_client.py / bootstrap.py
