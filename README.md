@@ -31,6 +31,7 @@
 - [18. MCP Server 构建 / 部署速查](#18-mcp-server-构建--部署速查commit-拆分总览)
 - [19. 大师归档（Buffett 等非 zhihu 语料）](#19-大师归档buffett-等非-zhihu-语料)
 - [20. Agentic RAG 升级（轻量版）](#20-agentic-rag-升级轻量版)
+- [21. 三层数据架构（结构化 MCP + web_search + agent-browser）](#21-三层数据架构结构化-mcp--web_search--agent-browser)
 
 ---
 
@@ -1538,6 +1539,109 @@ top hits 可能命中 1987 年英文信里的 "moat" 段落，
 
 跨语言检索质量比同语言略低（论文上 -5%-10%），但够用——
 现实里的失败模式更多是「博主真没说过」，不是「搜得不够准」。
+
+---
+
+## 21. 三层数据架构（结构化 MCP + web_search + agent-browser）
+
+### 21.1 问题
+
+财经类查询长尾几乎无穷：股价 / 估值 / 财报 / 业绩 / 分红 / 公告 / 北向 / 大宗 /
+研报 / 政策…… 一个个做成 MCP 是死路。但 agent 完全靠 web 搜索也不行——
+高频问题反复抓站会慢且不稳。
+
+### 21.2 三层分工
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Layer 1：结构化 MCP（bigv-market.*）                          │
+│   高频、确定性 schema、有缓存                                 │
+│   - get_stock_snapshot   股价/估值/市值/控股                  │
+│   - get_dividend_history A 股分红 + TTM 股息率                │
+│   - get_market_context   板块/大盘/主题                       │
+│   速度：~1s    缓存：10 min                                   │
+└────────────────────┬────────────────────────────────────────┘
+                     ▼ fallback when not covered
+┌─────────────────────────────────────────────────────────────┐
+│ Layer 2：web_search（bigv-market.web_search）                │
+│   通用搜索，返回 [{title, url, snippet, source}]              │
+│   走 Bing CN + post-filter（百科 / 政府门户 / 党媒 过滤）     │
+│   速度：~1-3s    缓存：10 min                                 │
+│                                                              │
+│   触发场景：财报 / 业绩 / 营收 / 公告 / 新闻 / 政策 / 研报     │
+└────────────────────┬────────────────────────────────────────┘
+                     ▼ snippet 不够时 (advisor 专属)
+┌─────────────────────────────────────────────────────────────┐
+│ Layer 3：agent-browser skill                                 │
+│   headless 浏览器，拿单 URL 完整内容                          │
+│   速度：~10-20s（含启动）  没缓存                              │
+│                                                              │
+│   触发场景：snippet 信息不够，要进 eastmoney / cls / sina      │
+│            等具体页面拿表格 / 长文                            │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### 21.3 关于 web_search 的实现选择
+
+**为什么是 Bing CN 而不是百度 / 搜狗**：
+- Bing CN：HTML SERP 干净（`li.b_algo`），UA 友好，反爬温和
+- 百度：广告占据前几条，百家号 / 内容农场污染严重
+- 搜狗：除非要查微信文章，否则没必要
+
+**为什么不用 SerpAPI / Bing API**：
+- 自用项目，没必要付费
+- Bing CN HTML 解析够稳
+
+**Bing CN 的坑**：
+- `site:` 操作符**被静默忽略**（中文 query 上）→ 我们改成 **post-filter** 黑名单
+- 短/泛查询会被拆词（「中国平安 财报」→ Bing 误判为「中国」+「平安」，返回中国政府网这种垃圾）→ 内置 junk-host 黑名单 + ticker 智能检测：
+  - 如果 query 有 ticker 码（601xxx 等），结果里都没出现该 ticker → 返回 `note` 让 agent 重写 query
+- 引号 / `+` 强制包含也**不可靠**
+
+**解决：教 agent 写好 query**（docstring + AGENTS.md 里反复强调）：
+- ✓ 用 ticker 替代股名（先 `get_stock_snapshot(中国平安)` 拿到 `601318`，再搜）
+- ✓ 年份紧贴指标（`2025年报` ✓ / `2025 年报` ✗）
+- ✗ 别用泛指（「X 财报」「X 业绩」）
+
+### 21.4 决策树（写进 advisor / bigv 的 prompt）
+
+```
+用户问题
+  │
+  ├─ 价格 / 估值 / 市值 / 控股 / 行业?      → Tier 1: get_stock_snapshot
+  ├─ 分红 / 股息 / 派息?                     → Tier 1: get_dividend_history
+  ├─ 板块 / 大盘 / 主题走势?                 → Tier 1: get_market_context
+  ├─ 财报 / 业绩 / 营收 / 公告 / 新闻 / 政策?
+  │   └─ Tier 2: web_search("<ticker> <具体关键词>")
+  │       ├─ 有 note 字段?  → 换 query 再搜 1 次（hard cap 3 次）
+  │       ├─ snippet 够答 → 直接引用 url 答
+  │       └─ snippet 不够 → Tier 3 (advisor only): agent-browser 进 top-1 url
+  └─ 都试完仍无果?  → 诚实告诉用户「该信息无法可靠获取」+ 给参考 url
+```
+
+### 21.5 决策标准：什么时候该升格成 Tier 1
+
+观察一两周 web_search 的实际使用。如果某类查询：
+- 出现频率 ≥ 每周 5 次
+- 数据源稳定（akshare / 雪球开放 API 有覆盖）
+- 用户期待结构化输出（比如表格 / 时间序列）
+
+→ 把这类升格成 Tier 1 MCP 工具（参考 `get_dividend_history` 的实现模式）。
+
+否则保持 Tier 2 即可。
+
+### 21.6 这个架构也套到博主分身上
+
+`bigv` agent 的 system_prompt_for（`web/chat.py`）已经更新：
+- 博主分身的 step 1-3 仍走 bigv-blogger.search（语料检索）
+- step 4 加：「如果 search 返回为空 / dist > 1.05，且用户问公开事实，调
+  `bigv-market.web_search` 拿公开资料」
+- 引用规则：明确区分「我说过的（来自语料）」vs「公开资料显示（来自 web_search）」
+
+效果：博主分身不再在用户问到他没说过的话题（如「立讯精密最新财报」）时
+干巴巴说「我没聊过」，而是会主动 web 搜公开数据，然后基于自己的方法论
+给出「按我的框架看……」的二次判断。语料库覆盖之外的话题也能合理回答，
+同时保持「我说过」vs「公开资料」的边界清晰。
 
 ---
 

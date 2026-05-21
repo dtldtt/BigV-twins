@@ -21,18 +21,24 @@ from .stock_data import (
     get_dividend_history as _get_dividend_history,
     get_stock_snapshot as _get_stock_snapshot,
 )
+from .web_search import web_search as _web_search
 
 log = logging.getLogger("bigv_twins.market_server")
 
 mcp = FastMCP(
     "bigv-market",
     instructions=(
-        "Real-time market data tools. `get_stock_snapshot(query)` fetches "
-        "current valuation / market cap / ownership / sector / index context "
-        "for a specific stock (A-share / HK / US). `get_market_context(topics)` "
-        "fetches recent (1w + 1m) performance for macro topics like 港股 / 黄金 / "
-        "煤炭 / AI. `get_dividend_history(query)` fetches the past N dividend "
-        "events + TTM yield for an A-share. All read-only, no LLM."
+        "Market data tools in three tiers — choose by question shape:\n"
+        "  TIER 1 (structured, fast, cached, deterministic schema):\n"
+        "    - `get_stock_snapshot(query)` — 估值 / 市值 / 控股 / 行业\n"
+        "    - `get_dividend_history(query)` — A 股分红历史 + TTM 股息率\n"
+        "    - `get_market_context(topics)` — 大盘 / 板块 / 主题最近 1w+1m 走势\n"
+        "  TIER 2 (general web search, snippets only, ~1s):\n"
+        "    - `web_search(query, mode)` — Bing CN，财经类自动加 site:filter\n"
+        "  TIER 3 (deep page fetch, in `advisor` workspace only):\n"
+        "    - `agent-browser` skill — headless 浏览器，慢但能拿完整内容\n"
+        "Decision rule: try TIER 1 first. If not covered, TIER 2 (snippet 通常够答). "
+        "If snippet 不够明确再 TIER 3 进具体 url。"
     ),
     host=settings.mcp_host,
     port=settings.mcp_market_port,
@@ -127,6 +133,58 @@ def get_dividend_history(
     - akshare 拉取偶尔超时，失败会返回空 history（不会抛错）
     """
     return _get_dividend_history(query, last_n=last_n)
+
+
+@mcp.tool()
+def web_search(
+    query: Annotated[
+        str,
+        Field(description="搜索关键词。**强烈建议带股票代码或具体年份**，详见 docstring"),
+    ],
+    top_k: Annotated[int, Field(ge=1, le=10)] = 5,
+) -> dict:
+    """通用 web 搜索（Bing CN，**Tier 2 工具，结构化 MCP 不覆盖时的兜底**）。
+
+    返回 top_k 条搜索结果 `{title, url, snippet, source}`。snippet 通常
+    已经包含关键数字 / 事实，**不需要再点进去**就能答用户的问题。
+
+    ## 何时用 web_search vs 其他工具
+
+    | 用户问题 | 该用 |
+    |---------|------|
+    | 「X 股票现价 / 估值 / 市值 / 控股」 | `get_stock_snapshot` (Tier 1) |
+    | 「X 分红 / 股息率 / 历年派息」 | `get_dividend_history` (Tier 1) |
+    | 「X 板块 / 大盘走势」 | `get_market_context` (Tier 1) |
+    | 「X 财报 / 业绩 / 营收」 | **web_search** (没结构化工具) |
+    | 「X 最新公告 / 业绩快报 / 新闻」 | **web_search** |
+    | 「行业政策 / 产业链分析 / 研报观点」 | **web_search** |
+    | snippet 还不够明确（advisor 专属） | `agent-browser` 进 top URL (Tier 3) |
+
+    ## ⚠ Query 构造规则（很重要 —— Bing CN 对短查询很挑）
+
+    Bing CN 会对泛指查询误判，把「中国 平安」拆成「中国」+「平安」然后返回
+    中国政府网 / 人民网这种垃圾。本工具内置 junk-domain post-filter 会丢掉
+    这些，但**如果 query 本身太宽，filter 完就空了**。
+
+    避坑姿势：
+    - ✓ **用股票代码替代股名**：`601318 财报` 远好于 `中国平安 财报`
+      （先调 `get_stock_snapshot(中国平安)` 拿 ticker 再来搜）
+    - ✓ **年份紧贴指标，不要空格**：`2025年报` ✓ / `2025 年报` ✗
+    - ✓ **加具体术语**：`半年报 / 中报 / 年度报告 / 三季报`
+    - ✗ 别用泛指：「X 业绩」「X 财报」单独用太宽
+    - ✗ 别加双引号或 `site:` —— Bing CN 对这些无效
+
+    ## 怎么使用返回结果
+
+    1. **优先看 snippet**——大多数财经事实 snippet 里已有
+    2. **引用必带 url**——读者要能核实
+    3. **多源交叉**——同一数字两个来源吻合才说"市场普遍认为"
+    4. **note 字段存在时**：说明 query 不够具体，**换词重搜一次**（用 ticker / 年份），
+       仍空 → 诚实告诉用户「该信息无法可靠获取」
+
+    硬限制：每个 user turn ≤ 3 次 web_search 调用（含 retry）。process 内缓存 10min。
+    """
+    return _web_search(query, top_k=top_k)
 
 
 def main() -> None:
