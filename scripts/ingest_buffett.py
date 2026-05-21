@@ -292,21 +292,29 @@ def _ingest_one_meeting_file(
     if not qa_blocks:
         return 0
 
-    # Build chunk list — each Q&A block is one or more chunks
-    chunk_records: list[tuple[int, str, str, int]] = []  # (qa_num, qa_title, text, sub_idx)
+    # Build chunk list — each Q&A block produces one or more chunks. We use a
+    # global ``seq`` counter (monotonic within this file) rather than the
+    # parsed ``qa_num`` to guarantee uniqueness in the source_id, in case the
+    # source markdown has duplicated `### N、` numbering somewhere.
+    chunk_records: list[tuple[int, int, str, str, int]] = []
+    # tuple = (seq, qa_num, qa_title, text, sub_idx)
+    seq = 0
     for qa_num, qa_title, qa_body in qa_blocks:
         sub_chunks = chunk_text(
             qa_body, size=settings.chunk_size, overlap=settings.chunk_overlap
         )
         for c in sub_chunks:
-            chunk_records.append((qa_num, qa_title, c.text, c.chunk_index))
+            chunk_records.append((seq, qa_num, qa_title, c.text, c.chunk_index))
+            seq += 1
 
     if not chunk_records:
         return 0
 
-    embeddings = embedder.encode_passages([t for _n, _ti, t, _i in chunk_records])
-    for (qa_num, qa_title, text, sub_idx), emb in zip(chunk_records, embeddings):
-        source_id = f"meeting-{year}-{file_hash}-q{qa_num}-c{sub_idx}"
+    embeddings = embedder.encode_passages([t for _s, _n, _ti, t, _i in chunk_records])
+    for (s, qa_num, qa_title, text, sub_idx), emb in zip(chunk_records, embeddings):
+        # source_id is unique-by-construction (seq counter); chunk_index is
+        # the sub-chunk index inside the Q&A block, useful for ordering.
+        source_id = f"meeting-{year}-{file_hash}-s{s:04d}"
         title = f"{year} 股东会 Q{qa_num} — {qa_title}"
         _insert_chunk(
             dst,
