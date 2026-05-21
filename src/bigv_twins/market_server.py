@@ -31,7 +31,7 @@ mcp = FastMCP(
         "Market data tools in three tiers — choose by question shape:\n"
         "  TIER 1 (structured, fast, cached, deterministic schema):\n"
         "    - `get_stock_snapshot(query)` — 估值 / 市值 / 控股 / 行业\n"
-        "    - `get_dividend_history(query)` — A 股分红历史 + TTM 股息率\n"
+        "    - `get_dividend_history(query)` — A 股分红历史 + 历史股息率(算法1) + 预测股息率(算法2)\n"
         "    - `get_market_context(topics)` — 大盘 / 板块 / 主题最近 1w+1m 走势\n"
         "  TIER 2 (general web search, snippets only, ~1s):\n"
         "    - `web_search(query, mode)` — Bing CN，财经类自动加 site:filter\n"
@@ -105,32 +105,64 @@ def get_dividend_history(
     ],
     last_n: Annotated[int, Field(ge=1, le=50)] = 10,
 ) -> dict:
-    """获取 A 股的分红派息历史 + 滚动 12 月分红总额 + 当前股息率。
+    """获取 A 股分红 + **两个股息率算法**（历史口径 + 预测口径）。
 
-    用户问到「X 的分红」「X 的股息率」「X 最近一次分红多少」「X 历年分红」时**先调这个**。
-    `get_stock_snapshot` 只给 PE/PB/市值这种实时基本面，不含分红——分红需要专门拉。
+    用户问到「X 的分红 / 股息率 / 历年派息 / 当下买入收益率」时**必先调这个**。
+    `get_stock_snapshot` 只给 PE/PB/市值，不含分红——分红逻辑独立。
 
-    返回字段：
-    - resolved: 解析后的代码 / 名称
-    - history: 最近 last_n 条分红事件，**最新在前**。每条字段：
-        - announce_date: 公告日期 (YYYY-MM-DD)
-        - amount_per_10: 每 10 股派息（元，A 股惯例）
-        - amount_per_share: 每股派息（元）
-        - ex_date: 除权除息日（持有到此日开盘前才能拿到）
-        - record_date: 股权登记日
-        - status: 「实施 / 预案 / 决议公告」（**预案**未必最终落地）
-        - has_split: 是否含送股 / 转增
-    - ttm: 滚动 12 月分红汇总：
-        - total_per_share: 累计每股分红（元，**仅累计 status=实施 的事件**）
-        - events: 12 月内已落地分红次数（A 股年报+中报通常 1-2 次）
-        - yield_pct: 年化股息率 = ttm.total_per_share / 现价 * 100（best-effort）
-        - window_days: 365
-    - source: akshare/stock_history_dividend_detail（数据源新浪）
+    ## 返回结构
 
-    限制 / 注意事项：
-    - **当前只支持 A 股**（包括沪深主板 / 创业板 / 科创板 / 北交所），HK/US 暂未实现
-    - 「预案」状态的分红还没真发——agent 引用时要明确区分
-    - akshare 拉取偶尔超时，失败会返回空 history（不会抛错）
+    - `current_price`: 当前股价（两个算法共用）
+    - `history[]`: 最近 last_n 条分红事件（公告日期/派息/除权日/股权登记日/进度）
+    - `by_fiscal_year[]`: **按财年分组**（最新在前）
+        - `fy`, `h1_div_per_10`, `fy_div_per_10`, `total_div_per_share`
+        - `eps_fy`: 该 FY 的每股收益（从年报 12-31 行拿）
+        - `payout_ratio`: 派息率 = total_div_per_share / eps_fy
+        - `is_announced`: 年报分红是否至少决议通过
+    - `algorithm_1_historical`: **历史口径股息率**（详见下方）
+    - `algorithm_2_forecast`: **预测口径股息率**（详见下方）
+    - `ttm`: legacy 字段（滚动 12 月），**优先使用 algorithm_1**
+
+    ## 算法 1（历史口径）
+
+    选最近一个已公告完成的财年（年报至少经股东大会决议通过），其中报 + 年报
+    所有现金分红 / 当前股价 = 历史股息率。代表「**按上一财年实际派息算的当前
+    买入收益率**」——这是大多数投资者口里"股息率"的标准定义。
+
+    ## 算法 2（预测口径）
+
+    取近 3 年（最少 2 年）的派息率均值 × 用 EPS 增长率外推得到的下一年预测 EPS
+    / 当前股价 = 预测股息率。
+
+    步骤（output 的 `calculation` 字段会展示完整推导）：
+      1. 各年派息率 = 当年分红/股 ÷ 当年 EPS_FY
+      2. 平均派息率
+      3. 各年 EPS YoY 增长率
+      4. 平均增长率
+      5. 预测下一年 EPS = 最新 EPS × (1 + 平均增长率)
+      6. 预测下一年分红 = 预测 EPS × 平均派息率
+      7. 算法 2 股息率 = 预测分红 / 当前股价
+
+    **预测值仅供参考**——一次性损益（如保险公司投资收益异常年份）会让 EPS
+    某年突增/突跌，平均增长率被拉偏，外推就失真。output 的 `note` 字段会
+    flag 这种异常（任一年 EPS 波动 > 40% 时）。
+
+    ## ⚠ Agent 必须遵守的展示规则
+
+    1. **两个算法都要展示**——不要只挑其中一个，用户要看到两面信息
+    2. **展示完整 `calculation` 字段**——让用户看清每一步推导
+    3. **明确标注**：算法 1 = 历史口径；算法 2 = **预测仅供参考**
+    4. 如果 `algorithm_2_forecast.note` 有内容（一次性损益警告），**重点提示用户**
+    5. 如果你是博主分身且有自己的派息率 / 估值方法论：
+       - **必须先调用此工具**并展示工具的两个算法结果
+       - 然后再加你自己的解读（"按我的方法看……")，但要标清楚哪是工具计算、哪是你的判断
+
+    ## 限制
+
+    - 当前只支持 A 股（沪深主板 / 创业板 / 科创板 / 北交所），HK/US 暂未实现
+    - 「预案」分红还没真发，算法 1 只取 "实施" 或 "决议通过" 的年报
+    - 算法 2 需至少 2 个完整财年数据；不够会返回 note 而非数字
+    - akshare 拉取偶尔超时——失败会返回空 history（不抛错）
     """
     return _get_dividend_history(query, last_n=last_n)
 

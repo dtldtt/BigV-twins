@@ -332,12 +332,308 @@ def _dividend_history_a_share(code: str) -> list[dict]:
     return out
 
 
+def _fhps_em_rows(code: str) -> list[dict]:
+    """Pull akshare 东财 stock_fhps_detail_em — gives us BOTH dividend amounts
+    and per-period EPS keyed by 报告期 (H1 → YYYY-06-30, FY → YYYY-12-31).
+
+    This is the data feed for Algorithm 1 (per-fiscal-year history) and
+    Algorithm 2 (forecast yield). Returns most-recent-first list of dicts:
+      {period: 'YYYY-MM-DD', fy: int, half: 'H1'|'FY',
+       dividend_per_10: float, eps: float, status: str}
+    """
+    try:
+        import akshare as ak
+        df = ak.stock_fhps_detail_em(symbol=code)
+    except Exception as e:
+        log.warning("stock_fhps_detail_em failed for %s: %s", code, e)
+        return []
+    if df is None or df.empty:
+        return []
+
+    out: list[dict] = []
+    for _, row in df.iterrows():
+        try:
+            period = row.get("报告期")
+            period_s = str(period)[:10] if period is not None else ""
+            if not period_s or period_s in ("NaT", "nan"):
+                continue
+            try:
+                fy = int(period_s[:4])
+            except ValueError:
+                continue
+            mmdd = period_s[5:10]
+            if mmdd == "06-30":
+                half = "H1"
+            elif mmdd == "12-31":
+                half = "FY"
+            else:
+                # quarterly or unusual; skip — we only model H1 + FY
+                continue
+
+            div_per_10 = float(row.get("现金分红-现金分红比例") or 0)
+            eps = row.get("每股收益")
+            try:
+                eps_f = float(eps) if eps is not None and str(eps) not in ("nan", "NaT") else None
+            except (ValueError, TypeError):
+                eps_f = None
+            status = str(row.get("方案进度") or "").strip()
+
+            out.append({
+                "period": period_s,
+                "fy": fy,
+                "half": half,
+                "dividend_per_10": round(div_per_10, 4),
+                "eps": eps_f,
+                "status": status,
+            })
+        except Exception as e:
+            log.warning("fhps_em row parse failed for %s: %s", code, e)
+            continue
+
+    # Sort most-recent first
+    out.sort(key=lambda r: r["period"], reverse=True)
+    return out
+
+
+def _group_by_fiscal_year(fhps_rows: list[dict]) -> list[dict]:
+    """Group fhps rows by FY (calendar year). Returns most-recent-first:
+      [{fy: int, h1_div: float|None, fy_div: float|None,
+        total_div_per_10: float, total_div_per_share: float,
+        eps_fy: float|None, payout_ratio: float|None,
+        is_announced: bool, statuses: list[str]}, ...]
+
+    is_announced = True iff both H1 and 年报 (or only 年报 if no H1 dividend
+    declared that year) have a row with status containing 「实施」 or
+    「股东大会决议通过」 — i.e. the announcement is locked in even if not
+    yet ex-dividend.
+    """
+    by_fy: dict[int, dict] = {}
+    for r in fhps_rows:
+        fy = r["fy"]
+        bucket = by_fy.setdefault(fy, {"fy": fy, "h1": None, "fy_row": None})
+        if r["half"] == "H1":
+            bucket["h1"] = r
+        else:  # FY
+            bucket["fy_row"] = r
+
+    out: list[dict] = []
+    for fy in sorted(by_fy, reverse=True):
+        b = by_fy[fy]
+        h1 = b["h1"]
+        fy_row = b["fy_row"]
+        h1_div = h1["dividend_per_10"] if h1 else None
+        fy_div = fy_row["dividend_per_10"] if fy_row else None
+        total_div_per_10 = (h1_div or 0) + (fy_div or 0)
+        eps_fy = fy_row["eps"] if fy_row else None  # 年报 row carries full-year EPS
+
+        payout_ratio = None
+        if eps_fy and eps_fy > 0 and total_div_per_10 > 0:
+            # total_div_per_share = total_div_per_10 / 10
+            payout_ratio = round((total_div_per_10 / 10) / eps_fy, 4)
+
+        statuses: list[str] = []
+        if h1:
+            statuses.append(h1["status"])
+        if fy_row:
+            statuses.append(fy_row["status"])
+
+        # FY is "announced" if the 年报 dividend has at least 决议通过 (i.e. board approved),
+        # even if not yet ex-dividend. Standalone H1 isn't "complete" by itself.
+        announced_keywords = ("实施", "决议通过")
+        fy_announced = bool(fy_row and any(k in fy_row["status"] for k in announced_keywords))
+        h1_announced = bool(h1 and any(k in h1["status"] for k in announced_keywords))
+        # A FY counts as fully announced if 年报 is announced (with or without H1)
+        # OR if the company doesn't pay 年报 but does pay H1 (rare) — for now,
+        # require FY annual to be announced.
+        is_announced = fy_announced
+
+        out.append({
+            "fy": fy,
+            "h1_div_per_10": h1_div,
+            "fy_div_per_10": fy_div,
+            "total_div_per_10": round(total_div_per_10, 4),
+            "total_div_per_share": round(total_div_per_10 / 10, 4),
+            "eps_fy": eps_fy,
+            "payout_ratio": payout_ratio,
+            "is_announced": is_announced,
+            "h1_announced": h1_announced,
+            "fy_announced": fy_announced,
+            "statuses": statuses,
+        })
+    return out
+
+
+def _algorithm_1_historical(by_fy: list[dict], current_price: float | None) -> dict:
+    """Algorithm 1: 按最近一个已公告完成的财年汇总分红 / 当前股价。
+
+    选择最近一个 `is_announced=True` 的财年（年报至少决议通过），用其
+    H1 + 年报 累计每股分红 / 现价，得出"历史口径"股息率。
+    """
+    method = (
+        "选取最近一个已公告完成的财年（年报至少经股东大会决议通过），"
+        "汇总该财年所有现金分红 (中报 + 年报)，除以当前股价。"
+        "代表「按上一财年实际派息水平算的股息率」。"
+    )
+    out: dict[str, Any] = {
+        "method": method,
+        "current_price": current_price,
+        "fiscal_year": None,
+        "h1_dividend_per_share": None,
+        "fy_dividend_per_share": None,
+        "total_dividend_per_share": None,
+        "yield_pct": None,
+        "calculation": None,
+        "note": None,
+    }
+
+    candidate = next((fy for fy in by_fy if fy["is_announced"]), None)
+    if candidate is None:
+        out["note"] = "没有任何财年的年报分红被公告，无法计算算法 1"
+        return out
+    if current_price is None or current_price <= 0:
+        out["note"] = "现价不可用，无法计算算法 1 的股息率（已给出每股分红数据）"
+
+    out["fiscal_year"] = candidate["fy"]
+    h1_share = (candidate["h1_div_per_10"] or 0) / 10
+    fy_share = (candidate["fy_div_per_10"] or 0) / 10
+    total_share = h1_share + fy_share
+    out["h1_dividend_per_share"] = round(h1_share, 4) if candidate["h1_div_per_10"] else None
+    out["fy_dividend_per_share"] = round(fy_share, 4) if candidate["fy_div_per_10"] else None
+    out["total_dividend_per_share"] = round(total_share, 4)
+
+    if current_price and current_price > 0 and total_share > 0:
+        y = total_share / current_price * 100
+        out["yield_pct"] = round(y, 2)
+        parts = []
+        if h1_share > 0:
+            parts.append(f"{h1_share:.2f} (中报)")
+        if fy_share > 0:
+            parts.append(f"{fy_share:.2f} (年报)")
+        sum_str = " + ".join(parts) if len(parts) > 1 else f"{total_share:.2f}"
+        out["calculation"] = (
+            f"FY{candidate['fy']} 总分红 = {sum_str} = {total_share:.2f} 元/股；"
+            f"算法 1 股息率 = {total_share:.2f} / {current_price:.2f} = {y:.2f}%"
+        )
+    return out
+
+
+def _algorithm_2_forecast(by_fy: list[dict], current_price: float | None,
+                          lookback: int = 3) -> dict:
+    """Algorithm 2: 用近 N 年平均派息率 × 预测下一年 EPS / 当前股价 = 预测股息率。
+
+    Steps:
+      1. 取最近 N 个 EPS 完整 (eps_fy > 0) + 分红已公告 (is_announced=True) 的财年
+      2. 各年派息率 = (年内总分红/股) / EPS_FY
+      3. 平均派息率 = 各年派息率均值
+      4. 各年 YoY EPS 增长率 = EPS_t / EPS_{t-1} - 1
+      5. 平均 EPS 增长率 = 各年增长率均值
+      6. 预测下一年 EPS = 最新 FY EPS × (1 + 平均增长率)
+      7. 预测下一年分红 = 预测 EPS × 平均派息率
+      8. 算法 2 股息率 = 预测分红 / 当前股价
+    """
+    method = (
+        "用近 N 年的派息率均值 × 用 EPS 增长率外推得到的下一年预测 EPS / 当前股价。"
+        "代表「假设公司维持过去派息率和盈利增速时，当前价位买入未来一年的预期股息率」。"
+        "**预测值仅供参考**——一次性损益、行业拐点、回购政策变化都会让实际偏离。"
+    )
+    out: dict[str, Any] = {
+        "method": method,
+        "current_price": current_price,
+        "lookback_target": lookback,
+        "fiscal_years_used": [],
+        "per_year": [],
+        "avg_payout_ratio": None,
+        "avg_eps_growth_pct": None,
+        "latest_eps": None,
+        "predicted_next_eps": None,
+        "predicted_next_dividend_per_share": None,
+        "yield_pct": None,
+        "calculation": None,
+        "note": None,
+    }
+
+    # Eligible = 已公告 + EPS 正且非空 + 派息率计算出来了
+    eligible = [
+        fy for fy in by_fy
+        if fy["is_announced"] and fy["eps_fy"] is not None
+        and fy["eps_fy"] > 0 and fy["payout_ratio"] is not None
+    ]
+    used = eligible[:lookback]  # most-recent first
+    if len(used) < 2:
+        out["note"] = (
+            f"算法 2 需要至少 2 个完整财年数据（含分红+EPS），目前只有 {len(used)} 个，"
+            "无法计算预测股息率"
+        )
+        return out
+
+    out["fiscal_years_used"] = [fy["fy"] for fy in used]
+    out["per_year"] = [
+        {
+            "fy": fy["fy"],
+            "dividend_per_share": fy["total_div_per_share"],
+            "eps": fy["eps_fy"],
+            "payout_ratio": fy["payout_ratio"],
+        }
+        for fy in used
+    ]
+
+    avg_payout = sum(fy["payout_ratio"] for fy in used) / len(used)
+    out["avg_payout_ratio"] = round(avg_payout, 4)
+
+    # YoY growth: used is most-recent first, so iterate adjacent pairs
+    growth_rates: list[float] = []
+    for i in range(len(used) - 1):
+        newer = used[i]
+        older = used[i + 1]
+        if older["eps_fy"] and older["eps_fy"] > 0:
+            g = (newer["eps_fy"] / older["eps_fy"]) - 1
+            growth_rates.append(g)
+    if not growth_rates:
+        out["note"] = "EPS 增长率无法计算（缺少历史 EPS）"
+        return out
+    avg_growth = sum(growth_rates) / len(growth_rates)
+    out["avg_eps_growth_pct"] = round(avg_growth * 100, 2)
+
+    latest_eps = used[0]["eps_fy"]
+    out["latest_eps"] = latest_eps
+    predicted_eps = latest_eps * (1 + avg_growth)
+    out["predicted_next_eps"] = round(predicted_eps, 4)
+    predicted_div = predicted_eps * avg_payout
+    out["predicted_next_dividend_per_share"] = round(predicted_div, 4)
+
+    if current_price and current_price > 0:
+        y = predicted_div / current_price * 100
+        out["yield_pct"] = round(y, 2)
+        payout_pcts = ", ".join(f"FY{p['fy']}={p['payout_ratio']*100:.1f}%" for p in out["per_year"])
+        growth_pcts = ", ".join(f"{g*100:+.1f}%" for g in growth_rates)
+        out["calculation"] = (
+            f"派息率序列 [{payout_pcts}] → 平均 {avg_payout*100:.1f}%；"
+            f"EPS 增长率序列 [{growth_pcts}] → 平均 {avg_growth*100:+.1f}%；"
+            f"预测下一年 EPS = {latest_eps:.2f} × (1 + {avg_growth:+.3f}) = {predicted_eps:.2f}；"
+            f"预测下一年分红 = {predicted_eps:.2f} × {avg_payout:.3f} = {predicted_div:.2f} 元/股；"
+            f"算法 2 预测股息率 = {predicted_div:.2f} / {current_price:.2f} = {y:.2f}%"
+        )
+
+    # Flag anomalous EPS jumps that distort the forecast (mainly 一次性 gains)
+    if any(abs(g) > 0.4 for g in growth_rates):
+        out["note"] = (
+            "近期 EPS 单年波动 >40%（可能含一次性损益），算法 2 的外推会被放大，"
+            "解读时**重点关注**这条注意。"
+        )
+    return out
+
+
 def get_dividend_history(query: str, *, last_n: int = 10) -> dict:
-    """Public dividend-history fetcher. A-share only for v1.
+    """Public dividend-history fetcher with two yield algorithms. A-share only.
 
     Returns:
-        {ok, query, resolved, fetched_at, ttm: {total_per_share, events, yield_pct},
-         history: [...up to last_n events...], source}
+        {ok, query, resolved, fetched_at,
+         history: [..raw events..],
+         ttm: {..backwards-compat trailing-12-month..},
+         by_fiscal_year: [..H1+FY grouped..],
+         algorithm_1_historical: {..yield by last complete FY..},
+         algorithm_2_forecast: {..predicted yield from payout × growth..},
+         source}
     """
     info = resolve_ticker(query)
     if info is None:
@@ -350,19 +646,34 @@ def get_dividend_history(query: str, *, last_n: int = 10) -> dict:
         }
 
     history = _dividend_history_a_share(info.code)
-    if not history:
+    fhps_rows = _fhps_em_rows(info.code)
+
+    # Pull current price once for both yield algorithms + TTM
+    current_price: float | None = None
+    try:
+        tc = _tencent_fetch(info.tencent_symbol)
+        c = tc.get("current")
+        if c and c > 0:
+            current_price = float(c)
+    except Exception:
+        pass
+
+    if not history and not fhps_rows:
         return {
             "ok": True, "query": query,
             "resolved": {"code": info.code, "name": info.name, "market": "a-share"},
             "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "current_price": current_price,
             "ttm": {"total_per_share": 0, "events": 0, "yield_pct": None},
+            "by_fiscal_year": [],
+            "algorithm_1_historical": {"note": "无数据"},
+            "algorithm_2_forecast": {"note": "无数据"},
             "history": [],
-            "source": "akshare/stock_history_dividend_detail",
+            "source": "akshare/stock_history_dividend_detail + stock_fhps_detail_em",
             "note": "未查询到分红记录（可能是非派现公司或新上市）",
         }
 
-    # TTM (trailing 12 months) — sum dividend events whose ex_date is within
-    # the last 365 days. Use ex_date for the cash-actually-paid date.
+    # --- TTM (legacy, backwards-compat) — kept for callers that still read this
     from datetime import timedelta as _td
     cutoff = (datetime.now(timezone.utc) - _td(days=365)).strftime("%Y-%m-%d")
     ttm_events = [
@@ -370,31 +681,36 @@ def get_dividend_history(query: str, *, last_n: int = 10) -> dict:
         if h.get("ex_date") and h["ex_date"] >= cutoff and h["status"] == "实施"
     ]
     ttm_total = round(sum(h["amount_per_share"] for h in ttm_events), 4)
+    ttm_yield_pct = None
+    if ttm_total > 0 and current_price:
+        ttm_yield_pct = round(ttm_total / current_price * 100, 2)
 
-    # Annualized yield (%) using current Tencent price; best-effort.
-    yield_pct = None
-    if ttm_total > 0:
-        try:
-            tc = _tencent_fetch(info.tencent_symbol)
-            current = tc.get("current")
-            if current and current > 0:
-                yield_pct = round(ttm_total / current * 100, 2)
-        except Exception:
-            pass
+    # --- New: fiscal-year grouping + the two algorithms
+    by_fy = _group_by_fiscal_year(fhps_rows)
+    algo1 = _algorithm_1_historical(by_fy, current_price)
+    algo2 = _algorithm_2_forecast(by_fy, current_price)
 
     return {
         "ok": True,
         "query": query,
         "resolved": {"code": info.code, "name": info.name, "market": "a-share"},
         "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "ttm": {
+        "current_price": current_price,
+        "ttm": {  # legacy, prefer algorithm_1 for "current yield"
             "total_per_share": ttm_total,
             "events": len(ttm_events),
-            "yield_pct": yield_pct,
+            "yield_pct": ttm_yield_pct,
             "window_days": 365,
+            "deprecation_note": (
+                "TTM (滚动 12 月) 容易跨财年导致解读歧义；优先用 algorithm_1_historical "
+                "(按完整财年汇总) 或 algorithm_2_forecast (预测下一年)。"
+            ),
         },
+        "by_fiscal_year": by_fy[:max(last_n, 5)],
+        "algorithm_1_historical": algo1,
+        "algorithm_2_forecast": algo2,
         "history": history[:last_n],
-        "source": "akshare/stock_history_dividend_detail",
+        "source": "akshare/stock_history_dividend_detail + stock_fhps_detail_em",
     }
 
 
