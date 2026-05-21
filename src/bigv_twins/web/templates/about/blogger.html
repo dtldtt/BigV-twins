@@ -14,6 +14,11 @@
       <p class="muted" style="margin:0">
         🤖 通用 AI 投资顾问 · 不基于任何博主语料
       </p>
+    {% elif blogger.is_master %}
+      <p class="muted" style="margin:0">
+        📜 大师归档 · 致股东信 + 股东大会 Q&amp;A
+        · 原文请访问 <a href="http://8.155.174.112:8000/masters/{{ blogger.slug }}" target="_blank" rel="noopener">知乎归档站点 · 大师归档</a>
+      </p>
     {% else %}
       <p class="muted" style="margin:0">
         🔗 <a href="https://www.zhihu.com/people/{{ blogger.url_token }}" target="_blank" rel="noopener">知乎主页</a>
@@ -22,7 +27,7 @@
     {% endif %}
   </header>
 
-  {% if author and not blogger.is_advisor %}
+  {% if author and not blogger.is_advisor and not blogger.is_master %}
     <div class="grid" style="gap:0.4rem">
       <div><strong>{{ author.follower_count or "?" }}</strong><br><small class="muted">关注</small></div>
       <div><strong>{{ author.answer_count or "?" }}</strong><br><small class="muted">答案</small></div>
@@ -48,7 +53,7 @@
   {% endif %}
 </details>
 
-{% if not blogger.is_advisor %}
+{% if not blogger.is_advisor and not blogger.is_master %}
 <details open>
   <summary style="font-size:1.1rem; padding:0.5rem 0; cursor:pointer"><strong>历史高赞 Top 5</strong></summary>
   <table style="margin-top:0.5rem">

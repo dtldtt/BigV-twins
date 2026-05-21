@@ -50,6 +50,14 @@
     "source": "zhihu"
   },
   {
+    "slug": "buffett",
+    "name": "Warren Buffett",
+    "tagline": "致股东信 (1977-) + 股东大会 Q&A (1994-) · 价值投资 · 能力圈 · 护城河",
+    "kind": "master",
+    "agent": "bigv",
+    "source": "letters"
+  },
+  {
     "slug": "advisor",
     "name": "AI 投顾",
     "tagline": "对照组 · 中立第三方 · 数据 + 技术分析框架 · 不站队任何博主",

@@ -25,6 +25,24 @@
           <a href="/about/{{ b.slug }}" role="button" class="outline" style="padding:0.4rem; font-size:0.85rem; text-align:center; margin:0; color:#fff; border-color:rgba(255,255,255,0.7)">📖 了解</a>
         </div>
       </article>
+    {% elif b.is_master %}
+      <article style="background:linear-gradient(135deg,#b45309 0%,#92400e 100%); color:#fff; border:1px solid #78350f; box-shadow:0 4px 12px rgba(180,83,9,0.25)">
+        <header style="margin-bottom:0.4rem">
+          <a href="/about/{{ b.slug }}" style="text-decoration:none; color:#fff">
+            <strong style="font-size:1.05rem">📜 {{ b.name }}</strong>
+          </a>
+          <span style="display:inline-block; margin-left:0.4rem; padding:0.05rem 0.4rem; font-size:0.7rem; background:rgba(255,255,255,0.2); border-radius:0.6rem; vertical-align:middle">大师归档</span>
+        </header>
+        {% if b.tagline %}
+          <p style="margin:0 0 0.6rem; min-height:2.4em; line-height:1.4; font-size:0.85rem; color:rgba(255,255,255,0.92)">
+            {{ b.tagline }}
+          </p>
+        {% endif %}
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.4rem">
+          <a href="/chat/{{ b.slug }}" role="button" style="padding:0.4rem; font-size:0.85rem; text-align:center; margin:0; background:#fff; color:#92400e; border-color:#fff; font-weight:600">💬 对话</a>
+          <a href="/about/{{ b.slug }}" role="button" class="outline" style="padding:0.4rem; font-size:0.85rem; text-align:center; margin:0; color:#fff; border-color:rgba(255,255,255,0.7)">📖 了解</a>
+        </div>
+      </article>
     {% else %}
       <article>
         <header style="margin-bottom:0.4rem">

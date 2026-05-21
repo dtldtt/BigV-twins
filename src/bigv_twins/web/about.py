@@ -53,6 +53,27 @@ async def about_page(
 
     blogger = BY_SLUG[slug]
 
+    # Master (kind='master', e.g. Buffett) has its own non-zhihu corpus — render
+    # a page that points to the master archive on the zhihu archive site (which
+    # hosts the original texts) and shows the persona we wrote for them.
+    if blogger.is_master:
+        persona_path = settings.persona_path(blogger.slug)
+        persona_text = persona_path.read_text(encoding="utf-8") if persona_path.exists() else (
+            f"## {blogger.name}\n\n（persona 文件尚未生成。）\n"
+        )
+        return templates.TemplateResponse(
+            request=request,
+            name="about/blogger.html",
+            context={
+                "user": user,
+                "blogger": blogger,
+                "author": {},
+                "top_posts": [],
+                "recent_posts": [],
+                "persona_text": persona_text,
+            },
+        )
+
     # Advisor (kind='advisor') has no zhihu archive — render a minimal page.
     if blogger.is_advisor:
         return templates.TemplateResponse(
