@@ -264,6 +264,140 @@ def _one_year_change_pct(symbol: str) -> Optional[float]:
     return _one_year_stats(symbol).get("change_1y_pct")
 
 
+def _dividend_history_a_share(code: str) -> list[dict]:
+    """Pull A-share dividend history via akshare → 新浪 stock_history_dividend_detail.
+
+    Returns list of dividend events sorted **most-recent first** with normalized fields:
+      announce_date / amount_per_10 (元) / amount_per_share / ex_date /
+      record_date / status (实施/预案/...) / has_split
+
+    Empty list on any failure or no history. Stock-split entries (送股/转增 > 0)
+    are kept but flagged so callers can treat them differently.
+    """
+    try:
+        import akshare as ak
+        df = ak.stock_history_dividend_detail(symbol=code, indicator="分红")
+    except Exception as e:
+        log.warning("stock_history_dividend_detail failed for %s: %s", code, e)
+        return []
+    if df is None or df.empty:
+        return []
+
+    # Columns per akshare doc: 公告日期 / 送股 / 转增 / 派息 / 进度 /
+    #                         除权除息日 / 股权登记日 / 红股上市日
+    def _date_str(v) -> str | None:
+        """Coerce pandas Timestamp / datetime / str / NaT / NaN → 'YYYY-MM-DD' or None.
+
+        ``hasattr(v, 'strftime')`` is true for ``pd.NaT`` but calling it raises;
+        screen with ``str(v) == 'NaT'`` first.
+        """
+        if v is None:
+            return None
+        s = str(v)
+        if s in ("NaT", "nan", "None", ""):
+            return None
+        if hasattr(v, "strftime"):
+            try:
+                return v.strftime("%Y-%m-%d")
+            except (ValueError, TypeError):
+                return None
+        return s[:10]
+
+    out: list[dict] = []
+    for _, row in df.iterrows():
+        try:
+            announce = _date_str(row.get("公告日期"))
+            ex = _date_str(row.get("除权除息日"))
+            rec = _date_str(row.get("股权登记日"))
+            amount_per_10 = float(row.get("派息") or 0)
+            songgu = float(row.get("送股") or 0)
+            zhuanzeng = float(row.get("转增") or 0)
+            out.append({
+                "announce_date": announce,
+                "amount_per_10": round(amount_per_10, 4),
+                "amount_per_share": round(amount_per_10 / 10, 4),
+                "ex_date": ex,
+                "record_date": rec,
+                "status": str(row.get("进度") or ""),
+                "songgu_per_10": songgu,
+                "zhuanzeng_per_10": zhuanzeng,
+                "has_split": (songgu > 0 or zhuanzeng > 0),
+            })
+        except Exception as e:
+            log.warning("dividend row parse failed for %s: %s", code, e)
+            continue
+
+    # Sort by announce_date desc (akshare usually returns oldest-first)
+    out.sort(key=lambda r: r["announce_date"] or "", reverse=True)
+    return out
+
+
+def get_dividend_history(query: str, *, last_n: int = 10) -> dict:
+    """Public dividend-history fetcher. A-share only for v1.
+
+    Returns:
+        {ok, query, resolved, fetched_at, ttm: {total_per_share, events, yield_pct},
+         history: [...up to last_n events...], source}
+    """
+    info = resolve_ticker(query)
+    if info is None:
+        return {"ok": False, "query": query, "error": f"无法识别股票：{query!r}"}
+    if info.market != "a-share":
+        return {
+            "ok": False, "query": query,
+            "resolved": {"code": info.code, "name": info.name, "market": info.market},
+            "error": f"分红数据当前只支持 A 股；{info.market} 暂未实现",
+        }
+
+    history = _dividend_history_a_share(info.code)
+    if not history:
+        return {
+            "ok": True, "query": query,
+            "resolved": {"code": info.code, "name": info.name, "market": "a-share"},
+            "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "ttm": {"total_per_share": 0, "events": 0, "yield_pct": None},
+            "history": [],
+            "source": "akshare/stock_history_dividend_detail",
+            "note": "未查询到分红记录（可能是非派现公司或新上市）",
+        }
+
+    # TTM (trailing 12 months) — sum dividend events whose ex_date is within
+    # the last 365 days. Use ex_date for the cash-actually-paid date.
+    from datetime import timedelta as _td
+    cutoff = (datetime.now(timezone.utc) - _td(days=365)).strftime("%Y-%m-%d")
+    ttm_events = [
+        h for h in history
+        if h.get("ex_date") and h["ex_date"] >= cutoff and h["status"] == "实施"
+    ]
+    ttm_total = round(sum(h["amount_per_share"] for h in ttm_events), 4)
+
+    # Annualized yield (%) using current Tencent price; best-effort.
+    yield_pct = None
+    if ttm_total > 0:
+        try:
+            tc = _tencent_fetch(info.tencent_symbol)
+            current = tc.get("current")
+            if current and current > 0:
+                yield_pct = round(ttm_total / current * 100, 2)
+        except Exception:
+            pass
+
+    return {
+        "ok": True,
+        "query": query,
+        "resolved": {"code": info.code, "name": info.name, "market": "a-share"},
+        "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "ttm": {
+            "total_per_share": ttm_total,
+            "events": len(ttm_events),
+            "yield_pct": yield_pct,
+            "window_days": 365,
+        },
+        "history": history[:last_n],
+        "source": "akshare/stock_history_dividend_detail",
+    }
+
+
 def _index_recent_10d(symbol: str, label: str) -> dict:
     try:
         import akshare as ak

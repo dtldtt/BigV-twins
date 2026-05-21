@@ -17,7 +17,10 @@ from pydantic import Field
 
 from .config import settings
 from .market_data import get_market_context as _get_market_context
-from .stock_data import get_stock_snapshot as _get_stock_snapshot
+from .stock_data import (
+    get_dividend_history as _get_dividend_history,
+    get_stock_snapshot as _get_stock_snapshot,
+)
 
 log = logging.getLogger("bigv_twins.market_server")
 
@@ -28,7 +31,8 @@ mcp = FastMCP(
         "current valuation / market cap / ownership / sector / index context "
         "for a specific stock (A-share / HK / US). `get_market_context(topics)` "
         "fetches recent (1w + 1m) performance for macro topics like 港股 / 黄金 / "
-        "煤炭 / AI. Both are read-only, no LLM, no auth needed (loopback only)."
+        "煤炭 / AI. `get_dividend_history(query)` fetches the past N dividend "
+        "events + TTM yield for an A-share. All read-only, no LLM."
     ),
     host=settings.mcp_host,
     port=settings.mcp_market_port,
@@ -85,6 +89,44 @@ def get_stock_snapshot(
     缓存 10 分钟，重复查询同一股票不再请求外部 API。
     """
     return _get_stock_snapshot(query)
+
+
+@mcp.tool()
+def get_dividend_history(
+    query: Annotated[
+        str,
+        Field(description="A 股代码 (如 601318) 或常见股票名 (如 中国平安/茅台)"),
+    ],
+    last_n: Annotated[int, Field(ge=1, le=50)] = 10,
+) -> dict:
+    """获取 A 股的分红派息历史 + 滚动 12 月分红总额 + 当前股息率。
+
+    用户问到「X 的分红」「X 的股息率」「X 最近一次分红多少」「X 历年分红」时**先调这个**。
+    `get_stock_snapshot` 只给 PE/PB/市值这种实时基本面，不含分红——分红需要专门拉。
+
+    返回字段：
+    - resolved: 解析后的代码 / 名称
+    - history: 最近 last_n 条分红事件，**最新在前**。每条字段：
+        - announce_date: 公告日期 (YYYY-MM-DD)
+        - amount_per_10: 每 10 股派息（元，A 股惯例）
+        - amount_per_share: 每股派息（元）
+        - ex_date: 除权除息日（持有到此日开盘前才能拿到）
+        - record_date: 股权登记日
+        - status: 「实施 / 预案 / 决议公告」（**预案**未必最终落地）
+        - has_split: 是否含送股 / 转增
+    - ttm: 滚动 12 月分红汇总：
+        - total_per_share: 累计每股分红（元，**仅累计 status=实施 的事件**）
+        - events: 12 月内已落地分红次数（A 股年报+中报通常 1-2 次）
+        - yield_pct: 年化股息率 = ttm.total_per_share / 现价 * 100（best-effort）
+        - window_days: 365
+    - source: akshare/stock_history_dividend_detail（数据源新浪）
+
+    限制 / 注意事项：
+    - **当前只支持 A 股**（包括沪深主板 / 创业板 / 科创板 / 北交所），HK/US 暂未实现
+    - 「预案」状态的分红还没真发——agent 引用时要明确区分
+    - akshare 拉取偶尔超时，失败会返回空 history（不会抛错）
+    """
+    return _get_dividend_history(query, last_n=last_n)
 
 
 def main() -> None:
