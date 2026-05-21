@@ -36,7 +36,7 @@ mcp = FastMCP(
         "(or `search_multi_query` if you need many sub-queries on one blogger)\n"
         "- 「X 在《XX 文章》里说了什么」 → `get_recent` to find zhihu_id, then `get_post`\n\n"
         "Retry / fallback rules (Agentic):\n"
-        "- If `search` returns 0 hits OR top distance > 1.3 (low relevance): rephrase the\n"
+        "- If `search` returns 0 hits OR top distance > 1.05 (low relevance): rephrase the\n"
         "  query (synonyms / shorter / domain term) and search ONE more time.\n"
         "- If both searches still come up empty: tell the user honestly the blogger has\n"
         "  not specifically discussed this — DO NOT make up an answer.\n"
@@ -113,11 +113,11 @@ def search(
     - **Topical questions** about the blogger's view / framework / opinion on
       something they may have written about ("X 怎么看 Y", "X 的方法论是什么")
 
-    Reading the result quality (gating signal):
-    - `distance < 0.9`  → very relevant, can cite directly
-    - `distance ~ 0.9-1.2` → topical match, usable
-    - `distance > 1.3`  → low relevance; **rephrase and try once more** before giving up
-    - empty result      → same — try a synonym or shorter query
+    Reading the result quality (gating signal, bge-m3 scale):
+    - `distance < 0.85` → very relevant, can cite directly
+    - `distance ~ 0.85-1.0` → topical match, usable
+    - `distance > 1.05` → low relevance; **rephrase and try once more** before giving up
+    - empty result     → same — try a synonym or shorter query
 
     Anti-patterns (DO NOT):
     - Don't call `search` for time-based questions ("最近", "这周", "今年")—use
