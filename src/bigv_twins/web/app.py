@@ -52,10 +52,13 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(generate_briefs_for_day, CronTrigger(hour=3, minute=30),
                       id="blogger_brief_daily",
                       misfire_grace_time=3600, replace_existing=True)
-    # Per-ticker daily brief at 03:35 (after blogger_brief_daily at 03:30)
-    scheduler.add_job(generate_ticker_briefs_for_day, CronTrigger(hour=3, minute=35),
-                      id="ticker_brief_daily",
-                      misfire_grace_time=3600, replace_existing=True)
+    # Per-ticker brief refreshed 3x daily; UPSERT same-day row (内容随交易日变厚)
+    #   08:00 — 昨日收盘+隔夜消息  12:30 — 加上当日早盘  18:00 — 全天数据
+    for hh, mm, jid in ((8, 0, "morning"), (12, 30, "midday"), (18, 0, "evening")):
+        scheduler.add_job(generate_ticker_briefs_for_day,
+                          CronTrigger(hour=hh, minute=mm),
+                          id=f"ticker_brief_{jid}",
+                          misfire_grace_time=1800, replace_existing=True)
     scheduler.start()
     app.state.scheduler = scheduler
     try:

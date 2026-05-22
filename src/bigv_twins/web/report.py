@@ -33,7 +33,9 @@ from .blogger_brief import get_latest_briefs
 from .daily_brief import get_global_indices, get_watchlist_quotes
 from .db import User, UserWatchlist
 from .news_scraper import get_cached_news
-from .ticker_brief import get_briefs_for_tickers
+from .ticker_brief import (
+    _today_str, get_briefs_for_tickers, regenerate_one_ticker_brief,
+)
 
 log = logging.getLogger("bigv_twins.web.report")
 router = APIRouter(prefix="/report")
@@ -173,6 +175,21 @@ async def watchlist_add(
             status_code=400,
             detail=f"{info.name} ({info.code}) 已经在你的自选里了",
         )
+    # Commit so the brief generator (which opens its own session) can see this row
+    await session.commit()
+
+    # Kick off brief generation. Wait up to 8s — most calls finish in 5-10s,
+    # so the user usually sees the brief on the redirected page. If it takes
+    # longer, the task continues running in background (asyncio.shield) and
+    # the row will be filled in by then for the next page load.
+    import asyncio
+    task = asyncio.create_task(
+        regenerate_one_ticker_brief(info.code, info.name, _today_str())
+    )
+    try:
+        await asyncio.wait_for(asyncio.shield(task), timeout=8)
+    except asyncio.TimeoutError:
+        log.info("watchlist_add: brief gen for %s exceeded 8s, will continue in bg", info.code)
     return RedirectResponse("/report", status_code=303)
 
 
@@ -201,4 +218,32 @@ async def watchlist_note(
     if item is None or item.user_id != user.id:
         raise HTTPException(status_code=404)
     item.note = note.strip()[:200] or None
+    return RedirectResponse("/report", status_code=303)
+
+
+@router.post("/ticker/{ticker}/refresh")
+async def ticker_refresh(
+    ticker: str,
+    user: Annotated[User, Depends(auth.require_user)],
+    session: Annotated[AsyncSession, Depends(db.get_session)],
+):
+    """Manually re-generate today's brief for a single ticker. Sync (≤30s)."""
+    import asyncio
+    # 该用户必须 own 这只 ticker（防止乱刷别人的）
+    row = await session.execute(
+        select(UserWatchlist)
+        .where(UserWatchlist.user_id == user.id)
+        .where(UserWatchlist.ticker == ticker)
+        .limit(1)
+    )
+    item = row.scalar_one_or_none()
+    if item is None:
+        raise HTTPException(status_code=404, detail="该股票不在你的自选里")
+    try:
+        await asyncio.wait_for(
+            regenerate_one_ticker_brief(item.ticker, item.name, _today_str()),
+            timeout=30,
+        )
+    except asyncio.TimeoutError:
+        log.warning("ticker_refresh: %s timed out after 30s", ticker)
     return RedirectResponse("/report", status_code=303)
