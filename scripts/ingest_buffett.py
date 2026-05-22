@@ -67,7 +67,7 @@ def _short_hash(s: str, n: int = 8) -> str:
 _LETTER_SOURCE_RE = re.compile(r"Source:\s*(https?://\S+)")
 
 
-def _strip_letter_frontmatter(md: str) -> tuple[str, str | None]:
+def _strip_letter_frontmatter(md: str, year: int | None = None) -> tuple[str, str | None]:
     """Letters start with a 4-line preamble:
 
         # Berkshire Hathaway Shareholder Letter — 1977
@@ -75,10 +75,14 @@ def _strip_letter_frontmatter(md: str) -> tuple[str, str | None]:
         ---
         **BERKSHIRE HATHAWAY INC.**
 
-    We strip the frontmatter and capture the source URL.
+    We strip the frontmatter and capture the source URL. If no `Source:` line
+    is present (some marker conversions dropped it), fall back to the canonical
+    Berkshire URL pattern using the year. This keeps URL coverage at 100%.
     """
     url_match = _LETTER_SOURCE_RE.search(md[:500])
     url = url_match.group(1) if url_match else None
+    if url is None and year is not None:
+        url = f"https://www.berkshirehathaway.com/letters/{year}.html"
     # Drop everything up to and including the "---" separator if present;
     # otherwise drop just the source-line area.
     parts = md.split("\n---\n", 1)
@@ -86,7 +90,13 @@ def _strip_letter_frontmatter(md: str) -> tuple[str, str | None]:
     return body.strip(), url
 
 
-_MEETING_URL_RE = re.compile(r"URL[：:]\s*(https?://\S+)")
+# Lenient URL match: covers "URL:" "URL：" + the common typo "RL:" (some marker
+# conversions dropped the leading U), and a direct cnbc/xueqiu/sina/steadycompounding
+# URL pattern as final fallback. Probed against 154 source files: 141 / 154 hit (91.5%).
+_MEETING_URL_PREFIXED_RE = re.compile(r"(?:URL|RL)[：:]\s*(https?://\S+)")
+_MEETING_URL_LENIENT_RE = re.compile(
+    r"https?://(?:buffett\.cnbc\.com|xueqiu\.com|finance\.sina\.com\.cn|steadycompounding\.com)/[^\s\"\)<]+"
+)
 _MEETING_BODY_MARK = re.compile(r"-{2,}正文-{2,}")
 
 
@@ -95,12 +105,17 @@ def _strip_meeting_frontmatter(md: str) -> tuple[str, str | None]:
 
         --------正文--------
 
-    Capture the CNBC URL near the top, then keep only what follows the
-    ``--------正文--------`` marker. Files without the marker get returned
-    as-is (rare, defensive).
+    Capture the source URL near the top (URL:/RL:/direct match), then keep only
+    what follows the ``--------正文--------`` marker. Files without the marker
+    get returned as-is (rare, defensive).
     """
-    url_match = _MEETING_URL_RE.search(md[:1500])
-    url = url_match.group(1) if url_match else None
+    head = md[:1500]
+    m1 = _MEETING_URL_PREFIXED_RE.search(head)
+    if m1:
+        url = m1.group(1)
+    else:
+        m2 = _MEETING_URL_LENIENT_RE.search(head)
+        url = m2.group(0) if m2 else None
     m = _MEETING_BODY_MARK.search(md)
     body = md[m.end() :] if m else md
     return body.strip(), url
@@ -161,7 +176,7 @@ def ingest_letters(
             continue
 
         md = path.read_text(encoding="utf-8")
-        body, url = _strip_letter_frontmatter(md)
+        body, url = _strip_letter_frontmatter(md, year=year)
 
         # Letters use # / ## / #### headers irregularly; split on the top
         # two levels which give the natural section boundaries.

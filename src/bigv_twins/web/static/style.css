@@ -285,9 +285,17 @@ nav[aria-label="breadcrumb"] a[aria-current="page"] {
 
 .multi-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  /* Always cap at 3 columns regardless of participant count — 5 / 10 people
+     just wrap into 2 / 4 rows. Avoids cramped horizontal stacking. */
+  grid-template-columns: repeat(3, 1fr);
   gap: 0.6rem;
   margin: 0.6rem 0;
+}
+@media (max-width: 1000px) {
+  .multi-cards { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 640px) {
+  .multi-cards { grid-template-columns: 1fr; }
 }
 
 .multi-card {
