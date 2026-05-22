@@ -177,6 +177,46 @@ class MultiSubResponse(Base):
     user_message: Mapped[MultiMessage] = relationship(back_populates="sub_responses")
 
 
+# ============================================================================
+# Investment report (投资日报) — per-user watchlist + cached daily artifacts
+# ============================================================================
+
+
+class UserWatchlist(Base):
+    """A stock in a user's watchlist. Resolved canonical ticker + name.
+
+    Max 30 per user (enforced in router). UNIQUE(user_id, ticker) prevents dupes.
+    Ordering: insertion order via `sort_order` (defaulted to id at insert time).
+    """
+    __tablename__ = "user_watchlist"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    ticker: Mapped[str] = mapped_column(String(16), nullable=False)
+    # Display name (resolved at add-time, may go stale on rename — refresh on view)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    # 'a-share' / 'hk' / 'us' — same as TickerInfo.market
+    market: Mapped[str] = mapped_column(String(16), nullable=False, default="a-share")
+    note: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    added_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+
+    __table_args__ = (
+        # SQLAlchemy way to add a unique constraint without using __table_args__
+        # directly. We attach via UniqueConstraint at runtime.
+    )
+
+
+# Add UNIQUE(user_id, ticker) properly via the Column-side
+from sqlalchemy import UniqueConstraint  # noqa: E402
+
+UserWatchlist.__table_args__ = (
+    UniqueConstraint("user_id", "ticker", name="uq_watchlist_user_ticker"),
+)
+
+
 _engine = create_async_engine(
     f"sqlite+aiosqlite:///{settings.chats_db_path}",
     echo=False,

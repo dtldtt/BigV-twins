@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}赛博大V · 投资日报{% endblock %}
+
+{% macro pct_cell(pct) %}
+  {% if pct is none %}
+    <span class="muted">—</span>
+  {% elif pct > 0 %}
+    <span style="color:#dc2626; font-weight:600">+{{ "%.2f"|format(pct) }}%</span>
+  {% elif pct < 0 %}
+    <span style="color:#16a34a; font-weight:600">{{ "%.2f"|format(pct) }}%</span>
+  {% else %}
+    <span class="muted">0.00%</span>
+  {% endif %}
+{% endmacro %}
+
+{% block content %}
+<div style="display:flex; justify-content:space-between; align-items:baseline; margin:0.2rem 0 1rem">
+  <h2 style="margin:0">📊 投资日报</h2>
+  <small class="muted">{{ user.username }} 的专属早间速览</small>
+</div>
+
+<!-- ============================== 全球行情 ============================== -->
+<section style="margin-bottom:1.5rem">
+  <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.4rem">
+    <h3 style="margin:0">🌐 全球行情</h3>
+    <small class="muted">1 分钟缓存 · 红涨绿跌</small>
+  </div>
+  <div class="indices-grid">
+    {% for idx in indices %}
+      <div class="index-card index-cat-{{ idx.category }}">
+        <div class="index-label">{{ idx.label }}</div>
+        {% if idx.ok %}
+          <div class="index-price">{{ "%.2f"|format(idx.current) if idx.current else "—" }}</div>
+          <div class="index-change">{{ pct_cell(idx.change_pct) }}</div>
+        {% else %}
+          <div class="index-price muted">—</div>
+          <div class="index-change muted">数据未取到</div>
+        {% endif %}
+      </div>
+    {% endfor %}
+  </div>
+</section>
+
+<!-- ============================== 我的自选 ============================== -->
+<section style="margin-bottom:1.5rem">
+  <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.4rem">
+    <h3 style="margin:0">⭐ 我的自选 <span class="muted" style="font-size:0.8rem">({{ watchlist|length }} / {{ max_watchlist }})</span></h3>
+  </div>
+
+  {% if watchlist_quotes %}
+    <table style="margin-bottom:0.5rem">
+      <thead>
+        <tr>
+          <th style="width:24%">名称</th>
+          <th style="width:10%">代码</th>
+          <th style="width:13%">现价</th>
+          <th style="width:13%">涨跌</th>
+          <th>备注</th>
+          <th style="width:7rem; text-align:right">操作</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for q in watchlist_quotes %}
+          <tr>
+            <td><strong>{{ q.name }}</strong> <small class="muted">{{ q.market }}</small></td>
+            <td><code>{{ q.ticker }}</code></td>
+            <td>{% if q.current %}{{ "%.2f"|format(q.current) }}{% else %}<span class="muted">—</span>{% endif %}</td>
+            <td>{{ pct_cell(q.change_pct) }}</td>
+            <td>
+              <form method="post" action="/report/watchlist/{{ q.wid }}/note" style="margin:0; display:flex; gap:0.3rem">
+                <input type="text" name="note" value="{{ q.note or '' }}" placeholder="加点备注…"
+                       style="margin:0; padding:0.2rem 0.4rem; font-size:0.85rem" maxlength="200">
+                <button type="submit" class="secondary outline" style="padding:0.2rem 0.5rem; font-size:0.75rem; margin:0">✓</button>
+              </form>
+            </td>
+            <td style="text-align:right">
+              <form method="post" action="/report/watchlist/{{ q.wid }}/delete" style="margin:0; display:inline"
+                    onsubmit="return confirm('从自选里删除 {{ q.name }}？')">
+                <button type="submit" class="secondary outline" style="padding:0.2rem 0.6rem; font-size:0.78rem; margin:0">删除</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted" style="padding:1rem; text-align:center; background:#f9fafb; border-radius:6px">
+      还没自选股。下方输入股票名或代码加入第一只。
+    </p>
+  {% endif %}
+
+  {% if watchlist|length < max_watchlist %}
+    <form method="post" action="/report/watchlist/add" style="display:flex; gap:0.4rem; margin-top:0.5rem; align-items:flex-start">
+      <input type="text" name="query" placeholder="股票名（如 茅台）或代码（如 600519）"
+             style="margin:0; flex:1" required maxlength="40">
+      <input type="text" name="note" placeholder="备注（可选）"
+             style="margin:0; flex:1" maxlength="200">
+      <button type="submit" style="margin:0; padding:0.4rem 1rem; white-space:nowrap">+ 加入自选</button>
+    </form>
+    <small class="muted" style="display:block; margin-top:0.3rem; padding-left:0.2rem">
+      支持沪深主板 / 创业板 / 科创板 / 北交所 / 港股；可用代码或常见股票名
+    </small>
+  {% else %}
+    <p class="muted" style="margin-top:0.5rem">已达 {{ max_watchlist }} 只上限，删一些再加。</p>
+  {% endif %}
+</section>
+
+<!-- ============================== 未来章节占位 ============================== -->
+<section style="opacity:0.5; padding:0.8rem; background:#f9fafb; border-radius:6px; margin-bottom:1rem">
+  <strong>🚧 即将推出</strong>
+  <ul style="margin:0.3rem 0 0 1rem; line-height:1.7; font-size:0.88rem">
+    <li><strong>📰 金十重要事件</strong> — 30 分钟刷新 + 利好/利空标签（P3）</li>
+    <li><strong>✍ 博主今日观点</strong> — 每位博主前一日主要观点 + 后续建议（P4）</li>
+    <li><strong>自选股相关动态</strong> — 提及该股的博主帖子 + 利好/利空（P5）</li>
+  </ul>
+</section>
+
+<style>
+.indices-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 0.5rem;
+}
+@media (max-width: 1000px) {
+  .indices-grid { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 640px) {
+  .indices-grid { grid-template-columns: repeat(2, 1fr); }
+}
+.index-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 0.5rem 0.7rem;
+  border-left: 4px solid #6b7280;
+}
+.index-cat-a-share   { border-left-color: #dc2626; }  /* 红 */
+.index-cat-hk        { border-left-color: #f59e0b; }  /* 琥珀 */
+.index-cat-us        { border-left-color: #2563eb; }  /* 蓝 */
+.index-cat-commodity { border-left-color: #b45309; }  /* 棕 */
+.index-label { font-size: 0.78rem; color: #6b7280; }
+.index-price { font-size: 1.15rem; font-weight: 600; margin-top: 0.1rem; }
+.index-change { font-size: 0.82rem; margin-top: 0.1rem; }
+</style>
+{% endblock %}
