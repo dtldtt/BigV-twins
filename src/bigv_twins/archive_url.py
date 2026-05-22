@@ -17,12 +17,13 @@ This module rewrites outbound MCP URLs to point at that local archive,
 falling back to the original external URL when the local equivalent isn't
 findable (e.g. a brand-new zhihu post not yet in the archive's content table).
 
-## Lookup tables
+## Lookup table
 
 - `_zhihu_id_to_cid`: dict[zhihu_id_str → contents.id] —— built once from
   zhihu.db at first call, refreshed lazily on miss
-- `_buffett_hash_to_file`: dict[filehash8 → (sub_dir, year, filename)] —— built
-  once from filesystem at first call (~150 files)
+
+(buffett meeting URLs use a short hash-based redirect at the zhihu side,
+so we don't need a filename lookup here — see `_buffett_local_url` below.)
 
 Thread-safe enough for our scale (MCP server is single-process; small
 race-window on the first-call init isn't a problem).
@@ -30,12 +31,9 @@ race-window on the first-call init isn't a problem).
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import re
 import sqlite3
-from pathlib import Path
-from urllib.parse import quote
 
 from .config import settings
 
@@ -47,12 +45,7 @@ log = logging.getLogger("bigv_twins.archive_url")
 ARCHIVE_BASE = "http://8.155.174.112:8000"
 
 
-# Where the Buffett markdown lives on disk (used to map filehash → filename).
-MASTERS_DIR = Path("/home/dtl/projects/zhihu/data/masters")
-
-
 _zhihu_id_to_cid: dict[str, int] | None = None
-_buffett_hash_to_file: dict[str, tuple[str, str, str]] | None = None
 
 
 def _open_zhihu_ro() -> sqlite3.Connection:
@@ -75,26 +68,6 @@ def _load_zhihu_lookup() -> None:
     except Exception:
         log.exception("archive_url: zhihu lookup load failed")
         _zhihu_id_to_cid = {}
-
-
-def _load_buffett_hash_lookup() -> None:
-    """Build filehash8 → (sub, year, filename) by walking the masters tree."""
-    global _buffett_hash_to_file
-    out: dict[str, tuple[str, str, str]] = {}
-    for sub in ("BRK-Annual-Meeting", "BRK-Annual-Meeting-Supplement"):
-        base = MASTERS_DIR / "buffett" / sub
-        if not base.exists():
-            continue
-        for year_dir in base.iterdir():
-            if not year_dir.is_dir() or not year_dir.name.isdigit():
-                continue
-            for f in year_dir.glob("*.md"):
-                if f.name == "README.md":
-                    continue
-                fh = hashlib.sha1(f.name.encode()).hexdigest()[:8]
-                out[fh] = (sub, year_dir.name, f.name)
-    _buffett_hash_to_file = out
-    log.info("archive_url: buffett filehash lookup loaded %d files", len(out))
 
 
 def _zhihu_local_url(zhihu_id: str) -> str | None:
@@ -124,7 +97,19 @@ _MEETING_PAT = re.compile(r"^meeting-(\d{4})-([a-f0-9]{8})-")
 
 
 def _buffett_local_url(source_id: str, content_type: str) -> str | None:
-    """Map a buffett source_id + content_type to a /masters/buffett/... URL."""
+    """Map a buffett source_id + content_type to a /masters/buffett/... URL.
+
+    For meetings we emit a **short hash-based URL** (``/m/{year}/{hash8}``)
+    instead of ``/meeting/{year}/{utf-8-filename}``. Reason: LLM streams URLs
+    one token at a time; URL-encoded Chinese filenames sometimes get one or
+    two bytes dropped/substituted in the model output, producing 404s.
+    ASCII hash URLs are token-safe. The zhihu archive site has a redirect
+    route at ``/masters/buffett/m/{year}/{hash}`` that 302s to the full
+    filename URL.
+
+    For letters we emit ``/letter/{year}`` directly — that URL has no Chinese,
+    no risk of corruption.
+    """
     if content_type == "letter":
         m = _LETTER_PAT.match(source_id)
         if m:
@@ -133,17 +118,9 @@ def _buffett_local_url(source_id: str, content_type: str) -> str | None:
         m = _MEETING_PAT.match(source_id)
         if m:
             year, fh = m.group(1), m.group(2)
-            global _buffett_hash_to_file
-            if _buffett_hash_to_file is None:
-                _load_buffett_hash_lookup()
-            entry = _buffett_hash_to_file.get(fh)
-            if entry:
-                sub, _y, fname = entry
-                suffix = "?supplement=true" if "Supplement" in sub else ""
-                return (
-                    f"{ARCHIVE_BASE}/masters/buffett/meeting/{year}/"
-                    f"{quote(fname)}{suffix}"
-                )
+            # Use hash-based short URL — zhihu's masters router redirects to
+            # the full filename. We don't even need to look up the file here.
+            return f"{ARCHIVE_BASE}/masters/buffett/m/{year}/{fh}"
     return None
 
 
