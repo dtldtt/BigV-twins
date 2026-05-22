@@ -48,41 +48,55 @@
   </div>
 
   {% if watchlist_quotes %}
-    <table style="margin-bottom:0.5rem">
-      <thead>
-        <tr>
-          <th style="width:24%">名称</th>
-          <th style="width:10%">代码</th>
-          <th style="width:13%">现价</th>
-          <th style="width:13%">涨跌</th>
-          <th>备注</th>
-          <th style="width:7rem; text-align:right">操作</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for q in watchlist_quotes %}
-          <tr>
-            <td><strong>{{ q.name }}</strong> <small class="muted">{{ q.market }}</small></td>
-            <td><code>{{ q.ticker }}</code></td>
-            <td>{% if q.current %}{{ "%.2f"|format(q.current) }}{% else %}<span class="muted">—</span>{% endif %}</td>
-            <td>{{ pct_cell(q.change_pct) }}</td>
-            <td>
-              <form method="post" action="/report/watchlist/{{ q.wid }}/note" style="margin:0; display:flex; gap:0.3rem">
-                <input type="text" name="note" value="{{ q.note or '' }}" placeholder="加点备注…"
-                       style="margin:0; padding:0.2rem 0.4rem; font-size:0.85rem" maxlength="200">
-                <button type="submit" class="secondary outline" style="padding:0.2rem 0.5rem; font-size:0.75rem; margin:0">✓</button>
-              </form>
-            </td>
-            <td style="text-align:right">
+    <div class="watch-list">
+      {% for q in watchlist_quotes %}
+        <article class="watch-card watch-verdict-{{ q.verdict or '中性' }}">
+          <header class="watch-head">
+            <div class="watch-name">
+              <strong>{{ q.name }}</strong>
+              <code class="watch-ticker">{{ q.ticker }}</code>
+              <small class="muted">{{ q.market }}</small>
+            </div>
+            <div class="watch-price">
+              {% if q.current %}<span class="watch-cur">{{ "%.2f"|format(q.current) }}</span>{% else %}<span class="muted">—</span>{% endif %}
+              <span class="watch-chg">{{ pct_cell(q.change_pct) }}</span>
+            </div>
+            <div class="watch-actions">
               <form method="post" action="/report/watchlist/{{ q.wid }}/delete" style="margin:0; display:inline"
                     onsubmit="return confirm('从自选里删除 {{ q.name }}？')">
-                <button type="submit" class="secondary outline" style="padding:0.2rem 0.6rem; font-size:0.78rem; margin:0">删除</button>
+                <button type="submit" class="secondary outline" style="padding:0.15rem 0.5rem; font-size:0.75rem; margin:0">删除</button>
               </form>
-            </td>
-          </tr>
-        {% endfor %}
-      </tbody>
-    </table>
+            </div>
+          </header>
+
+          {% if q.summary_md or q.mentions or q.verdict %}
+            <div class="watch-brief">
+              {% if q.verdict %}
+                <span class="watch-tag watch-tag-{{ q.verdict }}">
+                  {% if q.verdict == "利好" %}🟢 {{ q.verdict }}{% elif q.verdict == "利空" %}🔴 {{ q.verdict }}{% else %}⚪ {{ q.verdict }}{% endif %}
+                </span>
+                {% if q.verdict_reason %}<small class="muted">· {{ q.verdict_reason }}</small>{% endif %}
+              {% endif %}
+              {% if q.summary_md %}
+                <div class="watch-summary" data-raw="{{ q.summary_md }}">{{ q.summary_md }}</div>
+              {% endif %}
+              {% if q.mentions %}
+                <div class="watch-mentions">
+                  <small class="muted">提到该股的博主：</small>
+                  {% for slug in q.mentions %}<a href="/about/{{ slug }}" class="watch-mention-chip">{{ slug }}</a>{% endfor %}
+                </div>
+              {% endif %}
+            </div>
+          {% endif %}
+
+          <form method="post" action="/report/watchlist/{{ q.wid }}/note" class="watch-note">
+            <input type="text" name="note" value="{{ q.note or '' }}" placeholder="加点备注…"
+                   style="margin:0; padding:0.2rem 0.4rem; font-size:0.85rem" maxlength="200">
+            <button type="submit" class="secondary outline" style="padding:0.2rem 0.5rem; font-size:0.75rem; margin:0">保存备注</button>
+          </form>
+        </article>
+      {% endfor %}
+    </div>
   {% else %}
     <p class="muted" style="padding:1rem; text-align:center; background:#f9fafb; border-radius:6px">
       还没自选股。下方输入股票名或代码加入第一只。
@@ -186,14 +200,6 @@
   {% endif %}
 </section>
 
-<!-- ============================== 未来章节占位 ============================== -->
-<section style="opacity:0.5; padding:0.8rem; background:#f9fafb; border-radius:6px; margin-bottom:1rem">
-  <strong>🚧 即将推出</strong>
-  <ul style="margin:0.3rem 0 0 1rem; line-height:1.7; font-size:0.88rem">
-    <li><strong>自选股相关动态</strong> — 提及该股的博主帖子 + 利好/利空（P5）</li>
-  </ul>
-</section>
-
 <style>
 .indices-grid {
   display: grid;
@@ -265,11 +271,66 @@
 }
 .brief-body p { margin: 0.3rem 0; }
 .brief-body strong { color: #111827; }
+
+.watch-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.watch-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 0.55rem 0.8rem;
+  border-left: 4px solid #6b7280;
+  margin: 0;
+}
+.watch-verdict-利好 { border-left-color: #dc2626; background: #fef9f9; }
+.watch-verdict-利空 { border-left-color: #16a34a; background: #f6fdf8; }
+.watch-verdict-中性 { border-left-color: #9ca3af; }
+.watch-head {
+  display: flex; align-items: baseline; gap: 0.8rem;
+  flex-wrap: wrap;
+}
+.watch-name { flex: 1 1 auto; }
+.watch-ticker { margin-left: 0.4rem; font-size: 0.82rem; color: #6b7280; }
+.watch-price { display: flex; gap: 0.7rem; align-items: baseline; font-size: 0.95rem; }
+.watch-cur { font-weight: 600; }
+.watch-actions { margin-left: auto; }
+
+.watch-brief {
+  margin-top: 0.4rem;
+  padding-top: 0.4rem;
+  border-top: 1px dashed #e5e7eb;
+  font-size: 0.86rem;
+  line-height: 1.55;
+}
+.watch-tag {
+  display: inline-block;
+  padding: 0.05rem 0.4rem; border-radius: 0.4rem;
+  font-weight: 600; font-size: 0.78rem;
+  margin-right: 0.2rem;
+}
+.watch-tag-利好 { background: #fee2e2; color: #b91c1c; }
+.watch-tag-利空 { background: #dcfce7; color: #15803d; }
+.watch-tag-中性 { background: #f3f4f6; color: #4b5563; }
+.watch-summary { margin-top: 0.25rem; color: #1f2937; }
+.watch-summary p { margin: 0.2rem 0; }
+.watch-mentions { margin-top: 0.3rem; display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; }
+.watch-mention-chip {
+  font-size: 0.75rem;
+  background: #eef2ff;
+  color: #3730a3;
+  padding: 0.05rem 0.4rem;
+  border-radius: 0.4rem;
+  text-decoration: none;
+}
+.watch-mention-chip:hover { background: #c7d2fe; }
+.watch-note {
+  margin: 0.4rem 0 0; display: flex; gap: 0.3rem;
+}
+.watch-note input { flex: 1; }
 </style>
 
 <script>
-// Render brief_md as markdown HTML using marked + DOMPurify (loaded by base.html)
-document.querySelectorAll(".brief-body[data-raw]").forEach((el) => {
+// Render *_md as markdown HTML using marked + DOMPurify (loaded by base.html)
+document.querySelectorAll(".brief-body[data-raw], .watch-summary[data-raw]").forEach((el) => {
   if (typeof marked === "undefined" || typeof DOMPurify === "undefined") return;
   const raw = el.getAttribute("data-raw");
   const html = DOMPurify.sanitize(marked.parse(raw || ""));

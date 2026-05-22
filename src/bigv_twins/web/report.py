@@ -33,6 +33,7 @@ from .blogger_brief import get_latest_briefs
 from .daily_brief import get_global_indices, get_watchlist_quotes
 from .db import User, UserWatchlist
 from .news_scraper import get_cached_news
+from .ticker_brief import get_briefs_for_tickers
 
 log = logging.getLogger("bigv_twins.web.report")
 router = APIRouter(prefix="/report")
@@ -70,13 +71,31 @@ async def report_index(
     Tencent (~50-200ms typical).
     """
     import asyncio
+    import json as _json
     watchlist = await _list_watchlist(session, user.id)
     indices = await asyncio.to_thread(get_global_indices)
     watchlist_quotes = await asyncio.to_thread(get_watchlist_quotes, watchlist)
     news = await get_cached_news(limit=10)
     briefs = await get_latest_briefs()
-    # Build display tuples (Blogger object + brief + parsed tickers) for the template
-    import json as _json
+    # P5: attach per-ticker daily brief (cross-ref blogger mentions + news verdict)
+    ticker_briefs = await get_briefs_for_tickers([w.ticker for w in watchlist])
+    for q in watchlist_quotes:
+        tb = ticker_briefs.get(q["ticker"])
+        if tb:
+            try:
+                q["mentions"] = _json.loads(tb.blogger_mentions or "[]")
+            except _json.JSONDecodeError:
+                q["mentions"] = []
+            q["summary_md"] = tb.news_summary_md
+            q["verdict"] = tb.verdict
+            q["verdict_reason"] = tb.verdict_reason
+            q["brief_date"] = tb.brief_date
+        else:
+            q["mentions"] = []
+            q["summary_md"] = ""
+            q["verdict"] = ""
+            q["verdict_reason"] = ""
+    # blogger_briefs context
     blogger_brief_pairs = []
     for br in briefs:
         b = BY_SLUG.get(br.blogger_slug)

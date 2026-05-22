@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import AsyncIterator
 
 from sqlalchemy import (
-    Boolean, DateTime, ForeignKey, Integer, String, Text, select,
+    Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, select,
 )
 from sqlalchemy.ext.asyncio import (
     AsyncAttrs, AsyncSession, async_sessionmaker, create_async_engine,
@@ -204,17 +204,8 @@ class UserWatchlist(Base):
     added_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
 
     __table_args__ = (
-        # SQLAlchemy way to add a unique constraint without using __table_args__
-        # directly. We attach via UniqueConstraint at runtime.
+        UniqueConstraint("user_id", "ticker", name="uq_watchlist_user_ticker"),
     )
-
-
-# Add UNIQUE(user_id, ticker) properly via the Column-side
-from sqlalchemy import UniqueConstraint  # noqa: E402
-
-UserWatchlist.__table_args__ = (
-    UniqueConstraint("user_id", "ticker", name="uq_watchlist_user_ticker"),
-)
 
 
 class CachedNews(Base):
@@ -256,11 +247,40 @@ class BloggerDailyBrief(Base):
     post_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     generated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
 
+    __table_args__ = (
+        UniqueConstraint("blogger_slug", "brief_date", name="uq_brief_slug_date"),
+    )
 
-# UNIQUE on (slug, date) — only one brief per blogger per day
-BloggerDailyBrief.__table_args__ = (
-    UniqueConstraint("blogger_slug", "brief_date", name="uq_brief_slug_date"),
-)
+
+class TickerDailyBrief(Base):
+    """每只自选股每日的「相关动态」摘要。
+
+    Shared across all users — the data (news + blogger mentions) is public.
+    Generated at 03:35 by APScheduler job that walks all users' watchlist
+    unique tickers. UNIQUE(ticker, brief_date).
+
+    Composed of two parts:
+      - blogger_mentions: which blogger briefs from blogger_daily_brief
+        mentioned this ticker today (free, from JSON of mentioned_tickers field)
+      - news_summary_md: LLM-summarized 1-2 sentence(s) of today's news for
+        this ticker (via web_search) + verdict 利好/利空/中性
+    """
+    __tablename__ = "ticker_daily_brief"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ticker: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    brief_date: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
+    # JSON list of blogger slugs that mentioned this ticker today
+    blogger_mentions: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
+    # LLM-generated 1-2 sentence summary of today's news; empty if no news
+    news_summary_md: Mapped[str] = mapped_column(Text, default="", nullable=False)
+    verdict: Mapped[str] = mapped_column(String(8), default="中性", nullable=False)  # 利好 | 利空 | 中性
+    verdict_reason: Mapped[str] = mapped_column(String(120), default="", nullable=False)
+    generated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("ticker", "brief_date", name="uq_ticker_brief_date"),
+    )
 
 
 _engine = create_async_engine(
@@ -273,10 +293,26 @@ _SessionFactory = async_sessionmaker(_engine, expire_on_commit=False, class_=Asy
 
 
 async def init_db() -> None:
-    """Create tables if missing. Idempotent; called at app startup."""
+    """Create tables if missing. Idempotent; called at app startup.
+
+    Also retrofits UNIQUE indexes onto three tables whose constraints were
+    historically defined via post-class `__table_args__` assignment — a
+    SQLAlchemy idiom that silently doesn't actually register the constraint,
+    so `create_all` produced tables without them. New deployments now get the
+    constraints inline; existing DBs need this one-shot retrofit.
+    """
     async with _engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         await conn.exec_driver_sql("PRAGMA foreign_keys = ON")
+        for stmt in (
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_watchlist_user_ticker "
+            "ON user_watchlist (user_id, ticker)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_brief_slug_date "
+            "ON blogger_daily_brief (blogger_slug, brief_date)",
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_ticker_brief_date "
+            "ON ticker_daily_brief (ticker, brief_date)",
+        ):
+            await conn.exec_driver_sql(stmt)
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:

@@ -28,6 +28,7 @@ from .multi import router as multi_router
 from .blogger_brief import generate_briefs_for_day
 from .news_scraper import refresh_jin10_news
 from .report import router as report_router
+from .ticker_brief import generate_ticker_briefs_for_day
 
 
 PKG_DIR = Path(__file__).resolve().parent
@@ -50,6 +51,10 @@ async def lifespan(app: FastAPI):
     # daily indexer 03:21). Cron in Asia/Shanghai timezone.
     scheduler.add_job(generate_briefs_for_day, CronTrigger(hour=3, minute=30),
                       id="blogger_brief_daily",
+                      misfire_grace_time=3600, replace_existing=True)
+    # Per-ticker daily brief at 03:35 (after blogger_brief_daily at 03:30)
+    scheduler.add_job(generate_ticker_briefs_for_day, CronTrigger(hour=3, minute=35),
+                      id="ticker_brief_daily",
                       misfire_grace_time=3600, replace_existing=True)
     scheduler.start()
     app.state.scheduler = scheduler
