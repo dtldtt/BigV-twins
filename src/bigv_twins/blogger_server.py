@@ -17,9 +17,23 @@ from typing import Annotated
 from mcp.server.fastmcp import FastMCP
 from pydantic import Field
 
+from .archive_url import to_archive_url
 from .chunk import html_to_text
 from .config import BLOGGERS, BY_SLUG, settings
 from .search import search as _search
+
+
+def _rewrite(blogger: str, d: dict) -> dict:
+    """Rewrite the `url` field of a hit/row dict to the local archive site.
+    No-op if the rewrite can't find a local equivalent (keeps original URL).
+    """
+    d["url"] = to_archive_url(
+        blogger,
+        d.get("zhihu_id"),
+        d.get("content_type"),
+        d.get("url"),
+    )
+    return d
 
 log = logging.getLogger("bigv_twins.blogger_server")
 
@@ -130,7 +144,7 @@ def search(
     if content_type and content_type not in {"answer", "article", "pin"}:
         raise ValueError("content_type must be one of: answer | article | pin (or omit)")
     hits = _search(blogger, query, top_k=top_k, content_type=content_type)
-    return [h.to_dict() for h in hits]
+    return [_rewrite(blogger, h.to_dict()) for h in hits]
 
 
 @mcp.tool()
@@ -177,7 +191,7 @@ def search_multi_query(
         if not q.strip():
             continue
         for hit in _search(blogger, q, top_k=top_k_each, content_type=content_type):
-            d = hit.to_dict()
+            d = _rewrite(blogger, hit.to_dict())
             cid = d["chunk_id"]
             if cid not in seen or d["distance"] < seen[cid]["distance"]:
                 seen[cid] = d
@@ -222,7 +236,7 @@ def get_recent(
         sql += " ORDER BY created_time DESC LIMIT ?"
         params.append(n)
         rows = src.execute(sql, params).fetchall()
-        return [dict(r) for r in rows]
+        return [_rewrite(blogger, dict(r)) for r in rows]
     finally:
         src.close()
 
@@ -245,7 +259,7 @@ def get_post(
         ).fetchone()
         if not row:
             raise ValueError(f"post not found: blogger={blogger!r}, zhihu_id={zhihu_id!r}")
-        return {
+        d = {
             "zhihu_id": row["zhihu_id"],
             "content_type": row["content_type"],
             "title": row["title"],
@@ -257,6 +271,7 @@ def get_post(
             "created_time": row["created_time"],
             "updated_time": row["updated_time"],
         }
+        return _rewrite(blogger, d)
     finally:
         src.close()
 
