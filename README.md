@@ -1796,6 +1796,122 @@ messages.append(current_user_text)
 
 ---
 
+## 23. 投资日报（/report）
+
+### 23.1 一句话
+
+每天打开浏览器先看一眼：**全球行情 + 我的自选股 + 金十重要事件 + 博主前一日观点 + 每只自选股的相关动态**。
+一个 GET `/report` 渲染全部 5 块；耗时大头都做成 03:30 / 03:35 cron 缓存，
+访问页面时基本只查 DB + 一次 Tencent 行情 batched fetch。
+
+入口：
+- BigV-twins 顶 nav「📊 投资日报」（登录后可见）
+- zhihu 存档站 nav「📊 投资日报」（外链跳转）
+
+### 23.2 五块构成
+
+| 块 | 数据来源 | 刷新策略 |
+|----|----------|----------|
+| 🌐 全球行情 | Tencent `qt.gtimg.cn` batched | 每次访问 + 60s in-mem 缓存 |
+| ⭐ 我的自选 | `user_watchlist` + Tencent quotes | 同上 |
+| 📰 金十重要事件 | jin10 flash-api → LLM 标 利好/利空 | 30 min APScheduler，启动 1 次 |
+| ✍ 博主今日观点 | zhihu.db 前一日新帖 → advisor LLM | 03:30 cron |
+| ⭐ 自选股相关动态 | blogger_brief.mentioned_tickers cross-ref + web_search news | 03:35 cron |
+
+### 23.3 数据模型（4 张新表，全在 chats.db）
+
+| 表 | 关键字段 | 唯一约束 |
+|----|---------|---------|
+| `user_watchlist` | `user_id, ticker, name, market, note, sort_order` | `(user_id, ticker)` |
+| `cached_news` | `jin10_id, title, content, importance, verdict, verdict_reason` | `jin10_id` |
+| `blogger_daily_brief` | `blogger_slug, brief_date, brief_md, mentioned_tickers JSON, post_count` | `(blogger_slug, brief_date)` |
+| `ticker_daily_brief` | `ticker, brief_date, blogger_mentions JSON, news_summary_md, verdict, verdict_reason` | `(ticker, brief_date)` |
+
+后三张是「全用户共享」的（数据本来就是公开的，没必要 per-user 跑 LLM）。
+`user_watchlist` 上限 30 只/用户，路由层强约束。
+
+> 注：早先三张表（`user_watchlist` / `blogger_daily_brief` / `ticker_daily_brief`）的 `UniqueConstraint`
+> 误用了 post-class `__table_args__` 赋值写法，SQLAlchemy 不读，create_all 出来的表实际没有 unique index。
+> 已修：约束移进 class body；`init_db()` 加 `CREATE UNIQUE INDEX IF NOT EXISTS` 做一次性补建。
+
+### 23.4 APScheduler 后台任务
+
+`AsyncIOScheduler(timezone="Asia/Shanghai")` 装在 FastAPI lifespan 里：
+
+```python
+scheduler.add_job(refresh_jin10_news, IntervalTrigger(minutes=30), id="jin10_news")
+scheduler.add_job(refresh_jin10_news, "date", id="jin10_news_initial")        # startup
+scheduler.add_job(generate_briefs_for_day, CronTrigger(hour=3, minute=30),    # 博主前一日总结
+                  id="blogger_brief_daily")
+scheduler.add_job(generate_ticker_briefs_for_day, CronTrigger(hour=3, minute=35),
+                  id="ticker_brief_daily")                                    # 紧跟在博主总结之后
+```
+
+依赖链（每日凌晨）：
+```
+03:01  zhihu daily crawler          # 拉前一天新内容到 zhihu.db
+03:21  bigv-twins-daily.service     # embed 进 twins/*.db
+03:30  blogger_brief_daily          # 读 zhihu.db 前一天内容 → advisor 总结
+03:35  ticker_brief_daily           # 读 blogger_brief.mentioned_tickers + web_search → advisor 总结
+```
+
+全链都 idempotent（DB 层 unique + 代码层 skip-if-exists 双保险）。
+
+### 23.5 LLM 调用预算
+
+复用 `openclaw/advisor` agent，**没有**新建 agent。
+单日 LLM 调用次数：
+- jin10 批量 1 条 prompt（一次性分类 top-10 条）= 1 次 / 30 min = ~48 次/天
+- blogger_brief = N 个 zhihu 博主 = 5 次/天
+- ticker_brief = M 个全用户独立 ticker（去重）= 3-30 次/天 取决于用户活跃度
+
+由于 OpenClaw 月付订阅没有 per-call 计费，这个预算完全无负担。
+
+### 23.6 行情拉取（一次 HTTP 拉所有指数）
+
+`daily_brief.py` 把 10 个指数（上证 / 创业板 / 科创50 / 恒生 / 恒生科技 / 标普500 / 纳指 / 伦敦金现 / 布伦特原油）+ 用户自选合并成一次 Tencent batched call：
+
+- 指数走 `q={prefix}{code}` 多个 symbol 拼接，返回 tilde 分隔格式
+- 个股走 `hf_` 前缀（A 股 sh/sz/bj，港股 hk），返回逗号分隔格式
+- 两种解析函数：`_parse_index_tilde` + `_parse_hf`
+
+整次 ~200ms。`get_global_indices()` 和 `get_watchlist_quotes()` 各有独立 60s 内存缓存。
+
+### 23.7 自选股相关动态生成
+
+```python
+# ticker_brief.py
+for ticker in unique_watchlist_tickers:
+    # 1. 反查：哪些博主今天提到了这只？（DB 查询，free）
+    blogger_slugs = SELECT FROM blogger_daily_brief
+                    WHERE brief_date = day_str AND mentioned_tickers contains ticker
+
+    # 2. 拉今天新闻 snippets（web_search，5 条）
+    news = web_search(f"{ticker} {name} 最新公告 新闻", top_k=5)
+
+    # 3. 单次 advisor 调用：博主提及 + 新闻 → {summary_md, verdict, verdict_reason}
+    llm_out = advisor.summarize(...)
+
+    # 4. 存 ticker_daily_brief
+```
+
+UI 在 /report 自选股区每张 card 上展示 verdict tag (🟢利好/🔴利空/⚪中性) + 1-2 句话 summary + 提到该股的博主 chips。
+
+### 23.8 关键文件
+
+- `src/bigv_twins/web/db.py` —— 4 张新表 ORM 模型
+- `src/bigv_twins/web/report.py` —— `/report` 主页 + watchlist CRUD 路由
+- `src/bigv_twins/web/daily_brief.py` —— Tencent batched 行情拉取
+- `src/bigv_twins/web/news_scraper.py` —— jin10 flash-api 拉取 + LLM 利好/利空标
+- `src/bigv_twins/web/blogger_brief.py` —— 03:30 博主每日总结
+- `src/bigv_twins/web/ticker_brief.py` —— 03:35 自选股相关动态
+- `src/bigv_twins/web/app.py` —— APScheduler lifespan 注册 4 个 job
+- `src/bigv_twins/web/templates/report/index.html` —— /report 单页模板（含全部 5 块）
+- `src/bigv_twins/web/templates/base.html` —— 顶 nav 加「📊 投资日报」入口
+- `/home/dtl/projects/zhihu/app/templates/base.html` —— zhihu 存档站 nav 加同名外链入口
+
+---
+
 ## License
 
 私有项目，自用。BAAI/bge-m3 (MIT) by BAAI；OpenClaw (商业)；FastMCP (MIT)；FastAPI (MIT)；Pico CSS (MIT)；akshare (MIT)；Python markdown (BSD)。
