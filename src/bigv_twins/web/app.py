@@ -7,6 +7,9 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -22,6 +25,8 @@ from .auth_routes import router as auth_router
 from .chat import router as chat_router
 from .db import User
 from .multi import router as multi_router
+from .blogger_brief import generate_briefs_for_day
+from .news_scraper import refresh_jin10_news
 from .report import router as report_router
 
 
@@ -32,7 +37,26 @@ TEMPLATES = Jinja2Templates(directory=str(PKG_DIR / "templates"))
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await db.init_db()
-    yield
+    # APScheduler — periodic background jobs (jin10 refresh / daily blogger brief).
+    # Stored in a module-level dict so we can shut it down cleanly on lifespan exit.
+    scheduler = AsyncIOScheduler(timezone="Asia/Shanghai")
+    # Refresh jin10 news every 30 min; also kick off once at startup so a
+    # freshly-restarted server isn't empty
+    scheduler.add_job(refresh_jin10_news, IntervalTrigger(minutes=30), id="jin10_news",
+                      misfire_grace_time=300, replace_existing=True)
+    scheduler.add_job(refresh_jin10_news, "date", id="jin10_news_initial",
+                      replace_existing=True)
+    # Daily blogger brief at 03:30 (after zhihu daily timer 03:01 + bigv-twins
+    # daily indexer 03:21). Cron in Asia/Shanghai timezone.
+    scheduler.add_job(generate_briefs_for_day, CronTrigger(hour=3, minute=30),
+                      id="blogger_brief_daily",
+                      misfire_grace_time=3600, replace_existing=True)
+    scheduler.start()
+    app.state.scheduler = scheduler
+    try:
+        yield
+    finally:
+        scheduler.shutdown(wait=False)
 
 
 def create_app() -> FastAPI:

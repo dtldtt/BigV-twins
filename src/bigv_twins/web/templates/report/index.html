@@ -105,12 +105,91 @@
   {% endif %}
 </section>
 
+<!-- ============================== 金十重要事件 ============================== -->
+<section style="margin-bottom:1.5rem">
+  <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.4rem">
+    <h3 style="margin:0">📰 金十重要事件</h3>
+    <small class="muted">
+      {% if news %}
+        最近一条 {{ news[0].jin10_time }} · 半小时刷新
+      {% else %}
+        加载中…（首次启动后 30s 内会有数据）
+      {% endif %}
+    </small>
+  </div>
+
+  {% if news %}
+    <div class="news-list">
+      {% for n in news %}
+        <div class="news-card news-verdict-{{ n.verdict }}">
+          <div class="news-head">
+            <span class="news-time">{{ n.jin10_time[5:16] }}</span>
+            <span class="news-tag news-tag-{{ n.verdict }}">
+              {% if n.verdict == "利好" %}🟢 利好{% elif n.verdict == "利空" %}🔴 利空{% else %}⚪ 中性{% endif %}
+            </span>
+            <small class="muted" style="margin-left:auto">{{ n.verdict_reason }}</small>
+          </div>
+          <div class="news-content">
+            <a href="{{ n.link }}" target="_blank" rel="noopener" class="news-link">
+              {{ n.content[:200] }}{% if n.content|length > 200 %}…{% endif %}
+            </a>
+          </div>
+        </div>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted" style="padding:1rem; text-align:center; background:#f9fafb; border-radius:6px">
+      暂无数据。jin10 接口正在拉取，请等 30 秒后刷新。
+    </p>
+  {% endif %}
+</section>
+
+<!-- ============================== 博主今日观点 ============================== -->
+<section style="margin-bottom:1.5rem">
+  <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.4rem">
+    <h3 style="margin:0">✍ 博主今日观点</h3>
+    <small class="muted">
+      {% if blogger_briefs %}
+        {{ blogger_briefs[0][1].brief_date }} · 03:30 自动生成
+      {% else %}
+        暂无（明天 03:30 起每天自动生成前一日总结）
+      {% endif %}
+    </small>
+  </div>
+
+  {% if blogger_briefs %}
+    <div class="brief-grid">
+      {% for b, br, tickers in blogger_briefs %}
+        <article class="brief-card">
+          <header style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.3rem">
+            <strong>{{ b.name }}</strong>
+            <small class="muted">
+              {% if br.post_count > 0 %}{{ br.post_count }} 篇新帖{% else %}当日无新帖{% endif %}
+            </small>
+          </header>
+          <div class="brief-body" data-raw="{{ br.brief_md }}">{{ br.brief_md }}</div>
+          <footer style="margin-top:0.4rem; display:flex; justify-content:space-between; align-items:center">
+            <small class="muted">
+              {% if tickers %}
+                提到：{% for t in tickers %}<code>{{ t }}</code>{% if not loop.last %} {% endif %}{% endfor %}
+              {% endif %}
+            </small>
+            <a href="/about/{{ b.slug }}" style="font-size:0.78rem">详情 →</a>
+          </footer>
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted" style="padding:1rem; text-align:center; background:#f9fafb; border-radius:6px">
+      尚未生成任何博主日报。后台任务在 03:30 自动跑（依赖 zhihu 03:01 + bigv-twins-daily 03:21）。
+    </p>
+  {% endif %}
+</section>
+
 <!-- ============================== 未来章节占位 ============================== -->
 <section style="opacity:0.5; padding:0.8rem; background:#f9fafb; border-radius:6px; margin-bottom:1rem">
   <strong>🚧 即将推出</strong>
   <ul style="margin:0.3rem 0 0 1rem; line-height:1.7; font-size:0.88rem">
-    <li><strong>📰 金十重要事件</strong> — 30 分钟刷新 + 利好/利空标签（P3）</li>
-    <li><strong>✍ 博主今日观点</strong> — 每位博主前一日主要观点 + 后续建议（P4）</li>
     <li><strong>自选股相关动态</strong> — 提及该股的博主帖子 + 利好/利空（P5）</li>
   </ul>
 </section>
@@ -141,5 +220,60 @@
 .index-label { font-size: 0.78rem; color: #6b7280; }
 .index-price { font-size: 1.15rem; font-weight: 600; margin-top: 0.1rem; }
 .index-change { font-size: 0.82rem; margin-top: 0.1rem; }
+
+.news-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.news-card {
+  padding: 0.5rem 0.7rem;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  border-left: 4px solid #6b7280;
+}
+.news-verdict-利好 { border-left-color: #dc2626; background: #fef2f2; }
+.news-verdict-利空 { border-left-color: #16a34a; background: #f0fdf4; }
+.news-verdict-中性 { border-left-color: #6b7280; }
+.news-head {
+  display: flex; align-items: center; gap: 0.5rem;
+  font-size: 0.78rem; margin-bottom: 0.2rem;
+}
+.news-time { color: #6b7280; font-family: monospace; }
+.news-tag {
+  padding: 0.05rem 0.4rem; border-radius: 0.4rem;
+  font-weight: 600; font-size: 0.78rem;
+}
+.news-tag-利好 { background: #fee2e2; color: #b91c1c; }
+.news-tag-利空 { background: #dcfce7; color: #15803d; }
+.news-tag-中性 { background: #f3f4f6; color: #4b5563; }
+.news-content { font-size: 0.88rem; line-height: 1.5; }
+.news-link { color: #1f2937; text-decoration: none; }
+.news-link:hover { color: #2563eb; text-decoration: underline; }
+
+.brief-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.6rem;
+}
+@media (max-width: 800px) { .brief-grid { grid-template-columns: 1fr; } }
+.brief-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+  font-size: 0.86rem;
+  line-height: 1.55;
+  margin: 0;
+}
+.brief-body p { margin: 0.3rem 0; }
+.brief-body strong { color: #111827; }
 </style>
+
+<script>
+// Render brief_md as markdown HTML using marked + DOMPurify (loaded by base.html)
+document.querySelectorAll(".brief-body[data-raw]").forEach((el) => {
+  if (typeof marked === "undefined" || typeof DOMPurify === "undefined") return;
+  const raw = el.getAttribute("data-raw");
+  const html = DOMPurify.sanitize(marked.parse(raw || ""));
+  el.innerHTML = html;
+});
+</script>
 {% endblock %}

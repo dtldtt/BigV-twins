@@ -26,9 +26,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bigv_twins.stock_data import resolve_ticker
 
+from bigv_twins.config import BY_SLUG
+
 from . import auth, db
+from .blogger_brief import get_latest_briefs
 from .daily_brief import get_global_indices, get_watchlist_quotes
 from .db import User, UserWatchlist
+from .news_scraper import get_cached_news
 
 log = logging.getLogger("bigv_twins.web.report")
 router = APIRouter(prefix="/report")
@@ -69,6 +73,20 @@ async def report_index(
     watchlist = await _list_watchlist(session, user.id)
     indices = await asyncio.to_thread(get_global_indices)
     watchlist_quotes = await asyncio.to_thread(get_watchlist_quotes, watchlist)
+    news = await get_cached_news(limit=10)
+    briefs = await get_latest_briefs()
+    # Build display tuples (Blogger object + brief + parsed tickers) for the template
+    import json as _json
+    blogger_brief_pairs = []
+    for br in briefs:
+        b = BY_SLUG.get(br.blogger_slug)
+        if b is None:
+            continue
+        try:
+            tickers = _json.loads(br.mentioned_tickers or "[]")
+        except _json.JSONDecodeError:
+            tickers = []
+        blogger_brief_pairs.append((b, br, tickers))
     return templates.TemplateResponse(
         request=request,
         name="report/index.html",
@@ -77,6 +95,8 @@ async def report_index(
             "watchlist": watchlist,
             "watchlist_quotes": watchlist_quotes,
             "indices": indices,
+            "news": news,
+            "blogger_briefs": blogger_brief_pairs,
             "max_watchlist": MAX_WATCHLIST,
         },
     )
