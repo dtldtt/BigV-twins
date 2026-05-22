@@ -2,8 +2,11 @@
 {% block title %}赛博大V · 选择博主{% endblock %}
 
 {% block content %}
-<h2 style="margin:0.2rem 0 0.6rem">选择一位博主开始对话</h2>
-<p class="muted" style="margin:0 0 1rem">每位博主的回答严格基于其知乎归档，附原文链接。点博主名可看详细介绍。</p>
+<div style="display:flex; justify-content:space-between; align-items:baseline; margin:0.2rem 0 0.6rem">
+  <h2 style="margin:0">选择一位博主开始对话</h2>
+  <a href="/multi" role="button" style="margin:0; padding:0.4rem 0.8rem; font-size:0.88rem">⚡ 多人对话</a>
+</div>
+<p class="muted" style="margin:0 0 1rem">每位博主的回答严格基于其知乎归档，附原文链接。点博主名可看详细介绍。想同时听几位的对比视角？右上角 <strong>⚡ 多人对话</strong>。</p>
 
 <div class="bloggers-grid">
   {% for b in bloggers %}

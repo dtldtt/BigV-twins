@@ -102,6 +102,81 @@ class Message(Base):
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
 
 
+# ============================================================================
+# Multi-blogger conversations ("问所有人" 多人横向对比模式)
+#
+# Completely independent from single-blogger Conversation/Message above.
+# Deletion cascades within multi_* tables; does NOT touch individual chats.
+# ============================================================================
+
+
+class MultiConversation(Base):
+    __tablename__ = "multi_conversations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    title: Mapped[str] = mapped_column(String(120), nullable=False)
+    # JSON-encoded list of blogger slugs participating in this multi-conv.
+    # e.g. '["mr-dang","eyu","buffett","advisor"]'
+    participant_slugs: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=_now, onupdate=_now, nullable=False, index=True
+    )
+
+    messages: Mapped[list["MultiMessage"]] = relationship(
+        back_populates="conversation",
+        cascade="all, delete-orphan",
+        order_by="MultiMessage.created_at",
+    )
+
+
+class MultiMessage(Base):
+    """A single 'turn' marker — either the user's question or the rollup summary.
+
+    Per-blogger answers live in `MultiSubResponse` and FK back to the role='user'
+    message that triggered them.
+    """
+    __tablename__ = "multi_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    conversation_id: Mapped[int] = mapped_column(
+        ForeignKey("multi_conversations.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    role: Mapped[str] = mapped_column(String(16), nullable=False)  # 'user' | 'summary'
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+
+    conversation: Mapped[MultiConversation] = relationship(back_populates="messages")
+    sub_responses: Mapped[list["MultiSubResponse"]] = relationship(
+        back_populates="user_message",
+        cascade="all, delete-orphan",
+        order_by="MultiSubResponse.created_at",
+    )
+
+
+class MultiSubResponse(Base):
+    """One blogger's answer to one user-message in a multi-conversation."""
+    __tablename__ = "multi_sub_responses"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_message_id: Mapped[int] = mapped_column(
+        ForeignKey("multi_messages.id", ondelete="CASCADE"),
+        nullable=False, index=True,
+    )
+    blogger_slug: Mapped[str] = mapped_column(String(64), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    # 'running' (mid-stream, written as 'done' once SSE completes), 'done', 'error'
+    status: Mapped[str] = mapped_column(String(16), default="done", nullable=False)
+    error_msg: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+
+    user_message: Mapped[MultiMessage] = relationship(back_populates="sub_responses")
+
+
 _engine = create_async_engine(
     f"sqlite+aiosqlite:///{settings.chats_db_path}",
     echo=False,

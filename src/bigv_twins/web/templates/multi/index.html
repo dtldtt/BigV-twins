@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}赛博大V · 多人对话{% endblock %}
+
+{% block content %}
+<nav><ul>
+  <li><a href="/chat">← 单人对话</a></li>
+</ul></nav>
+
+<div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.6rem">
+  <h2 style="margin:0">⚡ 多人对话</h2>
+  <a href="/multi/new" role="button" style="margin:0">+ 新多人对话</a>
+</div>
+
+<p class="muted" style="margin:0 0 1rem">
+  一次向多位博主 / 大师 / AI 投顾问同一个问题，得到对比表格 + 共识/分歧分析。
+  每位看到的只是 ta 自己之前的回答，不会被其他人的语气污染。
+</p>
+
+{% if items %}
+  <table>
+    <thead>
+      <tr>
+        <th>标题</th>
+        <th>参与者</th>
+        <th>更新时间</th>
+        <th></th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for it in items %}
+        <tr>
+          <td><a href="/multi/{{ it.conv.id }}">{{ it.conv.title }}</a></td>
+          <td>
+            <small>{{ it.names | join(' · ') }}</small>
+            <br><small class="muted">{{ it.slugs | length }} 位</small>
+          </td>
+          <td class="muted">{{ it.conv.updated_at.strftime("%m-%d %H:%M") }}</td>
+          <td><a href="/multi/{{ it.conv.id }}">打开</a></td>
+          <td>
+            <form method="post" action="/multi/{{ it.conv.id }}/delete" style="margin:0"
+                  onsubmit="return confirm('删除这个多人对话？该对话下所有问答都会被删除，不可恢复');">
+              <button type="submit" class="secondary outline" style="padding:0.2rem 0.6rem">删除</button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <article style="text-align:center; padding:2rem">
+    <p class="muted">还没有多人对话。点上方 <strong>+ 新多人对话</strong> 开始。</p>
+  </article>
+{% endif %}
+{% endblock %}

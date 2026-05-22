@@ -21,6 +21,7 @@ from .admin import router as admin_router
 from .auth_routes import router as auth_router
 from .chat import router as chat_router
 from .db import User
+from .multi import router as multi_router
 
 
 PKG_DIR = Path(__file__).resolve().parent
@@ -54,6 +55,7 @@ def create_app() -> FastAPI:
     app.mount("/static", StaticFiles(directory=str(PKG_DIR / "static")), name="static")
     app.include_router(auth_router)
     app.include_router(chat_router)
+    app.include_router(multi_router)
     app.include_router(admin_router)
     app.include_router(about_router)
 

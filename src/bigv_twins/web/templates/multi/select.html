@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}赛博大V · 新多人对话{% endblock %}
+
+{% block content %}
+<nav><ul>
+  <li><a href="/multi">← 多人对话</a></li>
+</ul></nav>
+
+<h2 style="margin:0 0 0.6rem">⚡ 新多人对话</h2>
+<p class="muted" style="margin:0 0 1rem">
+  选择 <strong>{{ min }}-{{ max }}</strong> 位参与者，下一步开始问答。
+  每个问题会同时发给所有选中的人，最后由 AI 投顾汇总对比。
+</p>
+
+<form method="post" action="/multi/new" id="multi-new-form">
+  <label>
+    <span>对话标题（可选）</span>
+    <input type="text" name="title" placeholder="如：茅台值不值得加仓" maxlength="120" />
+  </label>
+
+  <fieldset style="margin-top:1rem">
+    <legend><strong>选择参与者</strong> <span id="count-display" class="muted">(已选 0)</span></legend>
+    <div class="bloggers-grid">
+      {% for b in bloggers %}
+        {% if b.is_advisor %}
+          <label class="multi-pick-card" data-card="advisor">
+            <input type="checkbox" name="participants" value="{{ b.slug }}" />
+            <span class="pick-card-body" style="background:linear-gradient(135deg,#7c3aed 0%,#2563eb 100%); color:#fff">
+              <strong>🤖 {{ b.name }}</strong>
+              <small style="display:block; opacity:0.85">{{ b.tagline }}</small>
+            </span>
+          </label>
+        {% elif b.is_master %}
+          <label class="multi-pick-card" data-card="master">
+            <input type="checkbox" name="participants" value="{{ b.slug }}" />
+            <span class="pick-card-body" style="background:linear-gradient(135deg,#b45309 0%,#92400e 100%); color:#fff">
+              <strong>📜 {{ b.name }}</strong>
+              <small style="display:block; opacity:0.85">{{ b.tagline }}</small>
+            </span>
+          </label>
+        {% else %}
+          <label class="multi-pick-card" data-card="blogger">
+            <input type="checkbox" name="participants" value="{{ b.slug }}" />
+            <span class="pick-card-body">
+              <strong>{{ b.name }}</strong>
+              <small style="display:block; color:#6b7280">{{ b.tagline }}</small>
+            </span>
+          </label>
+        {% endif %}
+      {% endfor %}
+    </div>
+  </fieldset>
+
+  <div style="margin-top:1rem; display:flex; gap:0.5rem">
+    <a href="/multi" role="button" class="secondary outline" style="margin:0">取消</a>
+    <button type="submit" id="multi-submit-btn" disabled style="margin:0">开始对话</button>
+  </div>
+</form>
+
+<style>
+.multi-pick-card { cursor: pointer; display: block; }
+.multi-pick-card input { display: none; }
+.multi-pick-card .pick-card-body {
+  display: block;
+  padding: 0.7rem 0.9rem;
+  border: 2px solid #e5e7eb;
+  border-radius: 6px;
+  background: #fff;
+  font-size: 0.9rem;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.multi-pick-card:hover .pick-card-body { border-color: #93c5fd; }
+.multi-pick-card input:checked + .pick-card-body {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37,99,235,0.18);
+}
+.multi-pick-card .pick-card-body small { line-height: 1.35; margin-top: 0.2rem; min-height: 2.4em; }
+</style>
+
+<script>
+(function () {
+  const form = document.getElementById("multi-new-form");
+  const btn = document.getElementById("multi-submit-btn");
+  const counter = document.getElementById("count-display");
+  const min = {{ min }};
+  const max = {{ max }};
+
+  function refresh() {
+    const n = form.querySelectorAll('input[name="participants"]:checked').length;
+    counter.textContent = `(已选 ${n})`;
+    btn.disabled = !(n >= min && n <= max);
+    btn.textContent = n > max ? `最多 ${max} 位` : (n < min ? `至少选 ${min} 位` : "开始对话");
+  }
+
+  form.querySelectorAll('input[name="participants"]').forEach((el) =>
+    el.addEventListener("change", refresh)
+  );
+  refresh();
+})();
+</script>
+{% endblock %}

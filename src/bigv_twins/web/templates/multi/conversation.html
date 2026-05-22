@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% block title %}{{ current_conv.title }} · 多人对话{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ul>
+    <li><a href="/multi">← 多人对话</a></li>
+  </ul>
+</nav>
+
+<div class="chat-layout">
+  <aside class="chat-sidebar">
+    <a href="/multi/new" role="button" style="width:100%; margin-bottom:0.6rem; padding:0.3rem 0.5rem; font-size:0.85rem">+ 新多人对话</a>
+    <small class="muted">所有多人对话</small>
+    <ul>
+      {% for c in sidebar_convos %}
+        <li style="margin:0.5rem 0">
+          <a href="/multi/{{ c.id }}"
+             class="{% if c.id == current_conv.id %}active{% endif %}">
+            {{ c.title }}
+          </a>
+          <br><small class="muted">{{ c.updated_at.strftime("%m-%d %H:%M") }}</small>
+        </li>
+      {% else %}
+        <li class="muted"><small>(还没有对话)</small></li>
+      {% endfor %}
+    </ul>
+  </aside>
+
+  <section class="chat-main">
+    <header>
+      <strong>{{ current_conv.title }}</strong>
+      <span class="muted">
+        · {{ participants | length }} 位参与者:
+        {% for p in participants %}
+          {% if p.is_advisor %}🤖{% elif p.is_master %}📜{% endif %}{{ p.name }}{% if not loop.last %} · {% endif %}
+        {% endfor %}
+      </span>
+      <form method="post" action="/multi/{{ current_conv.id }}/delete" style="float:right;margin:0"
+            onsubmit="return confirm('删除这个多人对话？该对话下所有问答都会被删除，不可恢复');">
+        <button type="submit" class="secondary outline" style="padding:0.25rem 0.7rem">删除对话</button>
+      </form>
+    </header>
+
+    <div id="messages" class="chat-messages">
+      {% for turn in turns %}
+        <!-- user question -->
+        <div class="chat-bubble user">{{ turn.user_msg.content }}</div>
+
+        <!-- per-blogger response cards (grid) -->
+        <div class="multi-cards" data-turn-um-id="{{ turn.user_msg.id }}">
+          {% for p in participants %}
+            {% set sub = turn.sub_responses_by_slug.get(p.slug) %}
+            {% set kind_cls = "advisor" if p.is_advisor else ("master" if p.is_master else "blogger") %}
+            <article class="multi-card multi-card-{{ kind_cls }}" data-blogger="{{ p.slug }}">
+              <header class="multi-card-head">
+                {% if p.is_advisor %}🤖{% elif p.is_master %}📜{% endif %}
+                <strong>{{ p.name }}</strong>
+                <span class="multi-card-status">{% if sub %}{% if sub.status == "error" %}❌ 失败{% else %}✓{% endif %}{% else %}—{% endif %}</span>
+              </header>
+              <div class="multi-card-body" data-raw="{{ sub.content if sub else '' }}">
+                {% if sub %}{{ sub.content }}{% else %}(无回答){% endif %}
+              </div>
+              {% if sub and sub.status == "error" %}
+                <small class="muted" style="display:block; padding:0 0.6rem 0.4rem">{{ sub.error_msg or "" }}</small>
+              {% endif %}
+            </article>
+          {% endfor %}
+        </div>
+
+        <!-- summary -->
+        {% if turn.summary_msg %}
+          <div class="multi-summary" data-raw="{{ turn.summary_msg.content }}">{{ turn.summary_msg.content }}</div>
+        {% endif %}
+      {% else %}
+        <p class="muted" id="empty-hint">
+          还没消息。试试问点什么，比如「茅台值不值得加仓？」「最近港股科网股有机会吗？」
+        </p>
+      {% endfor %}
+    </div>
+
+    <form id="multi-ask-form" class="chat-input" data-cid="{{ current_conv.id }}">
+      <textarea id="msg-input" rows="3" placeholder="问点什么… (Cmd/Ctrl+Enter 发送)" required></textarea>
+      <button type="submit" id="send-btn">发送</button>
+    </form>
+  </section>
+</div>
+
+<script>
+  // Hand the participant slug → display-name + kind map to multi.js so it can
+  // build new cards on the fly when streaming.
+  window.MULTI_PARTICIPANTS = [
+    {% for p in participants %}
+      {
+        slug: {{ p.slug | tojson }},
+        name: {{ p.name | tojson }},
+        kind: "{{ 'advisor' if p.is_advisor else ('master' if p.is_master else 'blogger') }}",
+      }{% if not loop.last %},{% endif %}
+    {% endfor %}
+  ];
+</script>
+<script src="/static/multi.js?v=1"></script>
+{% endblock %}

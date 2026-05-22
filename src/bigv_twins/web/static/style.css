@@ -280,3 +280,77 @@ nav[aria-label="breadcrumb"] a[aria-current="page"] {
   nav[aria-label="breadcrumb"] a { padding: 0.15rem 0.5rem; font-size: 0.8rem; }
   .topnav { padding: 0.15rem 0.6rem; }
 }
+
+/* --- multi-blogger conversation cards (问所有人) --- */
+
+.multi-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 0.6rem;
+  margin: 0.6rem 0;
+}
+
+.multi-card {
+  margin: 0;
+  padding: 0;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  font-size: 0.86rem;
+}
+.multi-card-blogger { border-left: 4px solid #6b7280; }
+.multi-card-master  { border-left: 4px solid #b45309; }
+.multi-card-advisor { border-left: 4px solid #7c3aed; }
+
+.multi-card-head {
+  padding: 0.4rem 0.6rem;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.85rem;
+}
+.multi-card-head strong { flex: 1; }
+.multi-card-status { font-size: 0.78rem; color: #6b7280; }
+
+.multi-card-body {
+  padding: 0.6rem 0.8rem;
+  line-height: 1.55;
+  overflow-x: auto;
+  flex: 1;
+}
+.multi-card-body p { margin: 0.4rem 0; }
+.multi-card-body p:first-child { margin-top: 0; }
+.multi-card-body p:last-child { margin-bottom: 0; }
+.multi-card-body h1, .multi-card-body h2, .multi-card-body h3, .multi-card-body h4 {
+  margin: 0.6rem 0 0.3rem;
+  font-size: 0.95rem;
+}
+.multi-card-body ul, .multi-card-body ol { margin: 0.3rem 0 0.3rem 1.4rem; }
+.multi-card-body code { background: #f3f4f6; padding: 0.05rem 0.25rem; border-radius: 3px; }
+.multi-card-body table { font-size: 0.82rem; border-collapse: collapse; margin: 0.4rem 0; }
+.multi-card-body th, .multi-card-body td { border: 1px solid #e5e7eb; padding: 0.25rem 0.4rem; }
+.multi-card-body blockquote { border-left: 3px solid #d1d5db; padding-left: 0.6rem; color: #4b5563; margin: 0.4rem 0; }
+
+.multi-summary {
+  background: #fef3c7;
+  border: 1px solid #fcd34d;
+  border-radius: 6px;
+  padding: 0.8rem 1rem;
+  margin: 0.6rem 0;
+  line-height: 1.6;
+  font-size: 0.88rem;
+}
+.multi-summary::before {
+  content: "📊 综合对比";
+  display: block;
+  font-weight: 600;
+  margin-bottom: 0.4rem;
+  color: #78350f;
+}
+.multi-summary table { border-collapse: collapse; margin: 0.4rem 0; font-size: 0.84rem; }
+.multi-summary th, .multi-summary td { border: 1px solid #fcd34d; padding: 0.3rem 0.5rem; background: rgba(255,255,255,0.6); }

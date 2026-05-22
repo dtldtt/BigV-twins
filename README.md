@@ -32,6 +32,7 @@
 - [19. 大师归档（Buffett 等非 zhihu 语料）](#19-大师归档buffett-等非-zhihu-语料)
 - [20. Agentic RAG 升级（轻量版）](#20-agentic-rag-升级轻量版)
 - [21. 三层数据架构（结构化 MCP + web_search + agent-browser）](#21-三层数据架构结构化-mcp--web_search--agent-browser)
+- [22. 多人对话（问所有人横向对比）](#22-多人对话问所有人横向对比)
 
 ---
 
@@ -1708,6 +1709,90 @@ top hits 可能命中 1987 年英文信里的 "moat" 段落，
 干巴巴说「我没聊过」，而是会主动 web 搜公开数据，然后基于自己的方法论
 给出「按我的框架看……」的二次判断。语料库覆盖之外的话题也能合理回答，
 同时保持「我说过」vs「公开资料」的边界清晰。
+
+---
+
+## 22. 多人对话（问所有人横向对比）
+
+### 22.1 解决什么问题
+
+之前要听 5 位博主对「茅台」的看法，得切 5 个对话窗口逐一问。
+多人对话让你**一次**向 2-10 位（博主 / 大师 / AI 投顾任意组合）问同一个
+问题，得到对比表格 + 一致 / 分歧 / 缺位三栏分析。
+
+UI 入口：`/chat` 右上角「⚡ 多人对话」按钮 → `/multi`。
+
+### 22.2 数据模型（独立于个人会话）
+
+完全独立的三张表，与现有 `Conversation/Message` 不交叉，删多人会话**不会**
+动任何个人会话。
+
+| 表 | 用途 |
+|----|------|
+| `multi_conversations` | 一个多人对话 = 一份参与者列表 (`participant_slugs` JSON) + 标题 + 时间戳 |
+| `multi_messages` | 用户问题 (`role='user'`) + 汇总消息 (`role='summary'`) |
+| `multi_sub_responses` | 每位 blogger 对每个 user message 的回答（N:1）+ status + error_msg |
+
+删除级联：`multi_conversations → multi_messages → multi_sub_responses` 全部
+cascade，限于多人会话子树。
+
+### 22.3 上下文隔离
+
+**关键设计**：在多人会话里，第 2 轮问鳄鱼时，给鳄鱼的上下文只包含**鳄鱼
+自己**第 1 轮的回答，**不包含**其他人的回答。否则他会模仿别人语气。
+
+```python
+# multi_orchestrator._build_messages_for_blogger
+messages = [system_prompt_for(blogger)]
+for prior_user_msg in prior_turns:
+    messages.append(prior_user_msg)
+    sub = sub_responses.find(blogger=this_blogger, status='done')  # 仅自己的
+    if sub:
+        messages.append(sub.content)
+messages.append(current_user_text)
+```
+
+### 22.4 SSE 多流复用
+
+后端用 `asyncio.Queue` 把 N 个并行 stream 合到一个 SSE 输出流。前端按
+`blogger_slug` 路由到对应卡片实时渲染。
+
+事件 schema（`data: <JSON>`）：
+
+```
+{"event": "blogger_start", "blogger": "eyu"}
+{"event": "blogger_delta", "blogger": "eyu", "content": "茅台啊..."}
+{"event": "blogger_done",  "blogger": "eyu"}
+{"event": "blogger_error", "blogger": "eyu", "error": "..."}
+{"event": "all_blogger_done"}
+{"event": "summary_delta", "content": "..."}
+{"event": "summary_done"}
+[DONE]
+```
+
+### 22.5 汇总者
+
+所有 blogger 流完后，再用一次 LLM 调用（`openclaw/advisor`，本来就是中立
+第三方）生成汇总。Prompt 严格要求：
+- 不重复任何博主原文（用户已经看到）
+- 三段式：对照表格 → 一致/分歧/缺位 → 综合判断 ≤ 80 字
+- 不编造、不劝架、缺位明确标注
+
+### 22.6 性能 + 存储
+
+- 总耗时 ≈ max(各 blogger 流式时间) + ~30s 汇总
+- 单轮存储估算（5 博主 + 1 汇总）：约 22 KB
+- 一个 10 轮会话 ≈ 220 KB；10 用户 × 100 会话 ≈ 220 MB（SQLite 完全无压力）
+- 你有 OpenClaw 月付订阅，5-10 倍 LLM 调用没有按调用计费成本
+
+### 22.7 关键文件
+
+- `src/bigv_twins/web/db.py` —— 3 张新表 ORM 模型
+- `src/bigv_twins/web/multi_orchestrator.py` —— fan-out + summary 逻辑
+- `src/bigv_twins/web/multi.py` —— FastAPI 路由（`/multi`, `/multi/new`, `/multi/<cid>`, `/multi/<cid>/ask`, `/multi/<cid>/delete`）
+- `src/bigv_twins/web/templates/multi/{index,select,conversation}.html`
+- `src/bigv_twins/web/static/multi.js` —— SSE 多流处理 + 按 blogger 路由
+- `src/bigv_twins/web/static/style.css` —— `.multi-cards / .multi-card-{blogger,master,advisor} / .multi-summary` 样式
 
 ---
 
