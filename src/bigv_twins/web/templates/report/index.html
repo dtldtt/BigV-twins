@@ -14,9 +14,12 @@
 {% endmacro %}
 
 {% block content %}
-<div style="display:flex; justify-content:space-between; align-items:baseline; margin:0.2rem 0 1rem">
+<div style="display:flex; justify-content:space-between; align-items:baseline; margin:0.2rem 0 1rem; flex-wrap:wrap; gap:0.3rem">
   <h2 style="margin:0">📊 投资日报</h2>
-  <small class="muted">{{ user.username }} 的专属早间速览</small>
+  <div style="display:flex; gap:0.6rem; align-items:baseline">
+    <a href="/report/history" style="font-size:0.85rem">🕰 历史 →</a>
+    <small class="muted">{{ user.username }} 的专属早间速览</small>
+  </div>
 </div>
 
 <!-- ============================== 全球行情 ============================== -->
@@ -366,6 +369,37 @@
 }
 @media (max-width: 640px) {
   .watch-add { grid-template-columns: 1fr; }
+}
+
+/* ----- phone-width tweaks ----- */
+@media (max-width: 640px) {
+  /* tighter card padding */
+  .index-card { padding: 0.4rem 0.55rem; }
+  .index-price { font-size: 1.02rem; }
+  .index-label { font-size: 0.74rem; }
+
+  .news-card { padding: 0.45rem 0.6rem; }
+  .news-head { flex-wrap: wrap; row-gap: 0.15rem; }
+  .news-head > .muted { margin-left: 0 !important; width: 100%; font-size: 0.72rem; }
+  .news-content { font-size: 0.84rem; }
+
+  .brief-card { padding: 0.5rem 0.65rem; font-size: 0.84rem; }
+
+  .watch-card { padding: 0.5rem 0.6rem; }
+  .watch-head { gap: 0.4rem; row-gap: 0.25rem; align-items: center; }
+  .watch-name { flex: 1 1 100%; line-height: 1.3; }
+  .watch-name strong { font-size: 0.98rem; }
+  .watch-ticker { margin-left: 0.3rem; font-size: 0.78rem; }
+  .watch-price { font-size: 0.88rem; gap: 0.5rem; flex: 1 1 auto; }
+  .watch-actions { margin-left: auto; flex: 0 0 auto; }
+  .watch-actions form button { padding: 0.2rem 0.55rem !important; font-size: 0.78rem !important; }
+
+  .watch-brief { font-size: 0.82rem; }
+  .watch-summary { font-size: 0.82rem; }
+  .watch-tag { font-size: 0.72rem; }
+  .watch-mention-chip { font-size: 0.72rem; }
+  .watch-note > input { font-size: 0.85rem; padding: 0.4rem 0.5rem; }
+  .watch-note > button { padding: 0.4rem 0.7rem; font-size: 0.82rem; }
 }
 </style>
 

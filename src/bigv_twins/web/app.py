@@ -28,6 +28,7 @@ from .multi import router as multi_router
 from .blogger_brief import generate_briefs_for_day
 from .news_scraper import refresh_jin10_news
 from .report import router as report_router
+from .search import rebuild_search_index, router as search_router
 from .ticker_brief import generate_ticker_briefs_for_day
 
 
@@ -35,27 +36,52 @@ PKG_DIR = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(PKG_DIR / "templates"))
 
 
+async def _refresh_jin10_and_index() -> None:
+    """jin10 拉新 + 增量重建搜索索引（FTS）。"""
+    await refresh_jin10_news()
+    await rebuild_search_index()
+
+
+async def _generate_blogger_briefs_and_index() -> None:
+    await generate_briefs_for_day()
+    await rebuild_search_index()
+
+
+async def _generate_ticker_briefs_and_index() -> None:
+    await generate_ticker_briefs_for_day()
+    await rebuild_search_index()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await db.init_db()
+    # Bootstrap search index from existing data
+    try:
+        counts = await rebuild_search_index()
+        logging.getLogger("bigv_twins.web").info("search index bootstrapped: %s", counts)
+    except Exception as e:
+        logging.getLogger("bigv_twins.web").warning(
+            "search index bootstrap failed (continuing): %s", e
+        )
     # APScheduler — periodic background jobs (jin10 refresh / daily blogger brief).
-    # Stored in a module-level dict so we can shut it down cleanly on lifespan exit.
+    # Each batch job has a wrapper that ALSO rebuilds the FTS search index
+    # afterwards, so /search stays fresh without manual rebuild.
     scheduler = AsyncIOScheduler(timezone="Asia/Shanghai")
     # Refresh jin10 news every 4 hours; also kick off once at startup so a
     # freshly-restarted server isn't empty
-    scheduler.add_job(refresh_jin10_news, IntervalTrigger(hours=4), id="jin10_news",
+    scheduler.add_job(_refresh_jin10_and_index, IntervalTrigger(hours=4), id="jin10_news",
                       misfire_grace_time=600, replace_existing=True)
-    scheduler.add_job(refresh_jin10_news, "date", id="jin10_news_initial",
+    scheduler.add_job(_refresh_jin10_and_index, "date", id="jin10_news_initial",
                       replace_existing=True)
     # Daily blogger brief at 03:30 (after zhihu daily timer 03:01 + bigv-twins
     # daily indexer 03:21). Cron in Asia/Shanghai timezone.
-    scheduler.add_job(generate_briefs_for_day, CronTrigger(hour=3, minute=30),
+    scheduler.add_job(_generate_blogger_briefs_and_index, CronTrigger(hour=3, minute=30),
                       id="blogger_brief_daily",
                       misfire_grace_time=3600, replace_existing=True)
     # Per-ticker brief refreshed 2x daily; UPSERT same-day row
     #   08:00 — 昨日收盘+隔夜消息  19:00 — 当日全天数据（收盘后 +1h）
     for hh, mm, jid in ((8, 0, "morning"), (19, 0, "evening")):
-        scheduler.add_job(generate_ticker_briefs_for_day,
+        scheduler.add_job(_generate_ticker_briefs_and_index,
                           CronTrigger(hour=hh, minute=mm),
                           id=f"ticker_brief_{jid}",
                           misfire_grace_time=1800, replace_existing=True)
@@ -90,6 +116,7 @@ def create_app() -> FastAPI:
     app.include_router(chat_router)
     app.include_router(multi_router)
     app.include_router(report_router)
+    app.include_router(search_router)
     app.include_router(admin_router)
     app.include_router(about_router)
 

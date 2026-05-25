@@ -362,3 +362,38 @@ nav[aria-label="breadcrumb"] a[aria-current="page"] {
 }
 .multi-summary table { border-collapse: collapse; margin: 0.4rem 0; font-size: 0.84rem; }
 .multi-summary th, .multi-summary td { border: 1px solid #fcd34d; padding: 0.3rem 0.5rem; background: rgba(255,255,255,0.6); }
+
+/* ============================================================================
+   Mobile / phone-width (≤ 640px) — global tweaks
+   Page-specific rules (watch-*, index-*, news-*) live in their templates.
+   ============================================================================ */
+@media (max-width: 640px) {
+  /* tighter outer gutter */
+  main.container { padding: 0.3rem 0.55rem 0.5rem; }
+
+  /* topnav: allow wrap; smaller text; tighter padding */
+  .topnav { padding: 0.15rem 0.5rem; }
+  .topnav ul { flex-wrap: wrap; gap: 0.1rem; }
+  .topnav li { padding: 0.1rem 0.35rem; font-size: 0.85rem; }
+  .topnav strong a { font-size: 0.92rem; }
+  .topnav form button { padding: 0.2rem 0.55rem !important; font-size: 0.78rem !important; }
+
+  /* generic section header (h3 + meta on right): allow wrap */
+  section > div:first-child {
+    flex-wrap: wrap;
+    gap: 0.2rem;
+  }
+
+  /* tables in non-chat pages: horizontal scroll instead of overflow break */
+  main.container > section table,
+  main.container > div > table {
+    display: block;
+    overflow-x: auto;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  /* about-blogger card etc.: smaller h2 */
+  main.container h2 { font-size: 1.15rem; }
+  main.container h3 { font-size: 1.02rem; }
+}

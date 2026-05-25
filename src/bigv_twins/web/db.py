@@ -313,6 +313,15 @@ async def init_db() -> None:
             "ON ticker_daily_brief (ticker, brief_date)",
         ):
             await conn.exec_driver_sql(stmt)
+        # FTS5 全站搜索表（trigram tokenizer 支持中文）。Contentless 模式 — 我们
+        # 自己管理 INSERT/DELETE，不挂触发器（少耦合）
+        await conn.exec_driver_sql("""
+            CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
+                source, title, body,
+                ref_id UNINDEXED, ref_url UNINDEXED, ref_date UNINDEXED,
+                tokenize='trigram'
+            )
+        """)
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:

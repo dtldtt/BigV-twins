@@ -1,0 +1,212 @@
+{% extends "base.html" %}
+{% block title %}赛博大V · 历史 {{ date or "" }}{% endblock %}
+
+{% block content %}
+<div style="display:flex; justify-content:space-between; align-items:baseline; margin:0.2rem 0 1rem; flex-wrap:wrap; gap:0.4rem">
+  <h2 style="margin:0">🕰 历史 brief{% if date %} · {{ date }}{% endif %}</h2>
+  <div style="display:flex; gap:0.5rem; align-items:center">
+    <a href="/report" style="font-size:0.85rem">← 回今天</a>
+    {% if available_dates %}
+      <form method="get" action="/report/history" style="margin:0; display:flex; gap:0.3rem">
+        <select name="date" onchange="this.form.submit()" style="margin:0; padding:0.25rem 0.5rem; font-size:0.85rem">
+          {% for d in available_dates %}
+            <option value="{{ d }}" {% if d == date %}selected{% endif %}>{{ d }}</option>
+          {% endfor %}
+        </select>
+      </form>
+    {% endif %}
+  </div>
+</div>
+
+{% if not available_dates %}
+  <p class="muted" style="padding:1.5rem; text-align:center; background:#f9fafb; border-radius:6px">
+    还没有任何历史 brief（blogger_daily_brief 表为空）。
+    每天 03:30 cron 才会生成；也可以手动跑回填脚本。
+  </p>
+{% else %}
+
+  <!-- ============================== 自选股当日 brief ============================== -->
+  <section style="margin-bottom:1.5rem">
+    <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.4rem">
+      <h3 style="margin:0">⭐ 自选股当日动态</h3>
+      <small class="muted">
+        {% if watch_display %}{{ watch_display|length }} 只股有 brief
+        {% else %}（你当前自选 0 只 / 这些股在 {{ date }} 当天还没建过 brief）
+        {% endif %}
+      </small>
+    </div>
+    {% if watch_display %}
+      <div class="watch-list">
+        {% for q in watch_display %}
+          <article class="watch-card watch-verdict-{{ q.verdict or '中性' }}">
+            <header class="watch-head">
+              <div class="watch-name">
+                <strong>{{ q.name }}</strong>
+                <code class="watch-ticker">{{ q.ticker }}</code>
+                <small class="muted">{{ q.market }}</small>
+              </div>
+            </header>
+            <div class="watch-brief">
+              {% if q.verdict %}
+                <span class="watch-tag watch-tag-{{ q.verdict }}">
+                  {% if q.verdict == "利好" %}🟢{% elif q.verdict == "利空" %}🔴{% else %}⚪{% endif %} {{ q.verdict }}
+                </span>
+                {% if q.verdict_reason %}<small class="muted">· {{ q.verdict_reason }}</small>{% endif %}
+              {% endif %}
+              {% if q.summary_md %}
+                <div class="watch-summary" data-raw="{{ q.summary_md }}">{{ q.summary_md }}</div>
+              {% endif %}
+              {% if q.mentions %}
+                <div class="watch-mentions">
+                  <small class="muted">提到该股的博主：</small>
+                  {% for slug in q.mentions %}<a href="/about/{{ slug }}" class="watch-mention-chip">{{ slug }}</a>{% endfor %}
+                </div>
+              {% endif %}
+            </div>
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted" style="padding:0.8rem; background:#f9fafb; border-radius:6px">
+        {{ date }} 当天没有你自选股的 brief（可能那时你还没加这些股）。
+      </p>
+    {% endif %}
+  </section>
+
+  <!-- ============================== 当日金十事件 ============================== -->
+  <section style="margin-bottom:1.5rem">
+    <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.4rem">
+      <h3 style="margin:0">📰 当日金十事件</h3>
+      <small class="muted">
+        {% if news %}{{ news|length }} 条{% else %}（无）{% endif %}
+      </small>
+    </div>
+    {% if news %}
+      <div class="news-list">
+        {% for n in news %}
+          <div class="news-card news-verdict-{{ n.verdict }}">
+            <div class="news-head">
+              <span class="news-time">{{ n.jin10_time[5:16] }}</span>
+              <span class="news-tag news-tag-{{ n.verdict }}">
+                {% if n.verdict == "利好" %}🟢 利好{% elif n.verdict == "利空" %}🔴 利空{% else %}⚪ 中性{% endif %}
+              </span>
+              <small class="muted" style="margin-left:auto">{{ n.verdict_reason }}</small>
+            </div>
+            <div class="news-content">
+              <a href="{{ n.link }}" target="_blank" rel="noopener" class="news-link">
+                {{ n.content[:200] }}{% if n.content|length > 200 %}…{% endif %}
+              </a>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted" style="padding:0.8rem; background:#f9fafb; border-radius:6px">
+        {{ date }} 当天没缓存任何金十事件（30 min cron 当时可能没跑）。
+      </p>
+    {% endif %}
+  </section>
+
+  <!-- ============================== 博主当日观点 ============================== -->
+  <section style="margin-bottom:1.5rem">
+    <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.4rem">
+      <h3 style="margin:0">✍ 博主观点</h3>
+      <small class="muted">
+        {% if blogger_briefs %}{{ blogger_briefs|length }} 位博主{% else %}（无）{% endif %}
+      </small>
+    </div>
+    {% if blogger_briefs %}
+      <div class="brief-grid">
+        {% for b, br, tickers in blogger_briefs %}
+          <article class="brief-card">
+            <header style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.3rem">
+              <strong>{{ b.name }}</strong>
+              <small class="muted">
+                {% if br.post_count > 0 %}{{ br.post_count }} 篇新帖{% else %}当日无新帖{% endif %}
+              </small>
+            </header>
+            <div class="brief-body" data-raw="{{ br.brief_md }}">{{ br.brief_md }}</div>
+            <footer style="margin-top:0.4rem; display:flex; justify-content:space-between; align-items:center">
+              <small class="muted">
+                {% if tickers %}
+                  提到：{% for t in tickers %}<code>{{ t }}</code>{% if not loop.last %} {% endif %}{% endfor %}
+                {% endif %}
+              </small>
+              <a href="/about/{{ b.slug }}" style="font-size:0.78rem">详情 →</a>
+            </footer>
+          </article>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted" style="padding:0.8rem; background:#f9fafb; border-radius:6px">
+        {{ date }} 当天没生成过 blogger_daily_brief。
+      </p>
+    {% endif %}
+  </section>
+
+{% endif %}
+
+<style>
+{# Reuse all styles from /report/index.html. Embedded copy here so this page is standalone. #}
+.news-list { display: flex; flex-direction: column; gap: 0.4rem; }
+.news-card {
+  padding: 0.5rem 0.7rem; background: #fff; border: 1px solid #e5e7eb;
+  border-radius: 6px; border-left: 4px solid #6b7280;
+}
+.news-verdict-利好 { border-left-color: #dc2626; background: #fef2f2; }
+.news-verdict-利空 { border-left-color: #16a34a; background: #f0fdf4; }
+.news-verdict-中性 { border-left-color: #6b7280; }
+.news-head { display: flex; align-items: center; gap: 0.5rem; font-size: 0.78rem; margin-bottom: 0.2rem; }
+.news-time { color: #6b7280; font-family: monospace; }
+.news-tag { padding: 0.05rem 0.4rem; border-radius: 0.4rem; font-weight: 600; font-size: 0.78rem; }
+.news-tag-利好 { background: #fee2e2; color: #b91c1c; }
+.news-tag-利空 { background: #dcfce7; color: #15803d; }
+.news-tag-中性 { background: #f3f4f6; color: #4b5563; }
+.news-content { font-size: 0.88rem; line-height: 1.5; }
+.news-link { color: #1f2937; text-decoration: none; }
+.news-link:hover { color: #2563eb; text-decoration: underline; }
+
+.brief-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.6rem; }
+@media (max-width: 800px) { .brief-grid { grid-template-columns: 1fr; } }
+.brief-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; padding: 0.6rem 0.8rem; font-size: 0.86rem; line-height: 1.55; margin: 0; }
+.brief-body p { margin: 0.3rem 0; }
+.brief-body strong { color: #111827; }
+
+.watch-list { display: flex; flex-direction: column; gap: 0.5rem; }
+.watch-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 6px; padding: 0.55rem 0.8rem; border-left: 4px solid #6b7280; margin: 0; }
+.watch-verdict-利好 { border-left-color: #dc2626; background: #fef9f9; }
+.watch-verdict-利空 { border-left-color: #16a34a; background: #f6fdf8; }
+.watch-verdict-中性 { border-left-color: #9ca3af; }
+.watch-head { display: flex; align-items: baseline; gap: 0.8rem; flex-wrap: wrap; }
+.watch-name { flex: 1 1 auto; }
+.watch-ticker { margin-left: 0.4rem; font-size: 0.82rem; color: #6b7280; }
+.watch-brief { margin-top: 0.4rem; padding-top: 0.4rem; border-top: 1px dashed #e5e7eb; font-size: 0.86rem; line-height: 1.55; }
+.watch-tag { display: inline-block; padding: 0.05rem 0.4rem; border-radius: 0.4rem; font-weight: 600; font-size: 0.78rem; margin-right: 0.2rem; }
+.watch-tag-利好 { background: #fee2e2; color: #b91c1c; }
+.watch-tag-利空 { background: #dcfce7; color: #15803d; }
+.watch-tag-中性 { background: #f3f4f6; color: #4b5563; }
+.watch-summary { margin-top: 0.25rem; color: #1f2937; }
+.watch-summary p { margin: 0.2rem 0; }
+.watch-mentions { margin-top: 0.3rem; display: flex; flex-wrap: wrap; gap: 0.3rem; align-items: center; }
+.watch-mention-chip { font-size: 0.75rem; background: #eef2ff; color: #3730a3; padding: 0.05rem 0.4rem; border-radius: 0.4rem; text-decoration: none; }
+.watch-mention-chip:hover { background: #c7d2fe; }
+
+@media (max-width: 640px) {
+  .watch-card { padding: 0.5rem 0.6rem; }
+  .watch-head { gap: 0.4rem; }
+  .watch-name { flex: 1 1 100%; }
+  .news-head { flex-wrap: wrap; }
+  .news-head > .muted { margin-left: 0 !important; width: 100%; }
+  .brief-card { padding: 0.5rem 0.65rem; font-size: 0.84rem; }
+}
+</style>
+
+<script>
+document.querySelectorAll(".brief-body[data-raw], .watch-summary[data-raw]").forEach((el) => {
+  if (typeof marked === "undefined" || typeof DOMPurify === "undefined") return;
+  const raw = el.getAttribute("data-raw");
+  const html = DOMPurify.sanitize(marked.parse(raw || ""));
+  el.innerHTML = html;
+});
+</script>
+{% endblock %}

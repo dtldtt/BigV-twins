@@ -20,7 +20,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select
+from sqlalchemy import distinct, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,7 +31,7 @@ from bigv_twins.config import BY_SLUG
 from . import auth, db
 from .blogger_brief import get_latest_briefs
 from .daily_brief import get_global_indices, get_watchlist_quotes
-from .db import User, UserWatchlist
+from .db import BloggerDailyBrief, CachedNews, TickerDailyBrief, User, UserWatchlist
 from .news_scraper import get_cached_news
 from .ticker_brief import (
     _today_str, get_briefs_for_tickers, regenerate_one_ticker_brief,
@@ -219,6 +219,108 @@ async def watchlist_note(
         raise HTTPException(status_code=404)
     item.note = note.strip()[:200] or None
     return RedirectResponse("/report", status_code=303)
+
+
+@router.get("/history", response_class=HTMLResponse)
+async def report_history(
+    request: Request,
+    user: Annotated[User, Depends(auth.require_user)],
+    session: Annotated[AsyncSession, Depends(db.get_session)],
+    date: str = "",
+):
+    """时间机器视图：渲染指定日期那天的博主观点 + 你自选股的 brief + 当日金十事件。
+
+    日期来源：blogger_daily_brief.brief_date distinct list，按降序。
+    self-watchlist 是当前的（历史 watchlist 没保留 — 没必要）。
+    """
+    import json as _json
+
+    # available dates: union of blogger + ticker brief dates
+    dates_q = await session.execute(
+        select(distinct(BloggerDailyBrief.brief_date))
+        .order_by(BloggerDailyBrief.brief_date.desc())
+    )
+    available_dates = [r[0] for r in dates_q.all()]
+
+    if not available_dates:
+        return templates.TemplateResponse(
+            request=request,
+            name="report/history.html",
+            context={"user": user, "date": None, "available_dates": [],
+                     "watch_display": [], "blogger_briefs": [], "news": []},
+        )
+
+    if not date:
+        date = available_dates[0]
+    if date not in available_dates:
+        raise HTTPException(status_code=404, detail=f"没有 {date} 的 brief 数据")
+
+    # blogger briefs that day
+    bb_rows = await session.execute(
+        select(BloggerDailyBrief).where(BloggerDailyBrief.brief_date == date)
+    )
+    blogger_briefs = list(bb_rows.scalars())
+
+    # ticker briefs for user's current watchlist, on that day
+    watchlist = await _list_watchlist(session, user.id)
+    tickers = [w.ticker for w in watchlist]
+    ticker_briefs_map: dict[str, TickerDailyBrief] = {}
+    if tickers:
+        tb_rows = await session.execute(
+            select(TickerDailyBrief)
+            .where(TickerDailyBrief.brief_date == date)
+            .where(TickerDailyBrief.ticker.in_(tickers))
+        )
+        ticker_briefs_map = {tb.ticker: tb for tb in tb_rows.scalars()}
+
+    watch_display = []
+    for w in watchlist:
+        tb = ticker_briefs_map.get(w.ticker)
+        if tb is None:
+            continue
+        try:
+            mentions = _json.loads(tb.blogger_mentions or "[]")
+        except _json.JSONDecodeError:
+            mentions = []
+        watch_display.append({
+            "ticker": w.ticker, "name": w.name, "market": w.market,
+            "verdict": tb.verdict, "verdict_reason": tb.verdict_reason,
+            "summary_md": tb.news_summary_md, "mentions": mentions,
+        })
+
+    # news from that day (jin10_time is "YYYY-MM-DD HH:MM:SS")
+    news_rows = await session.execute(
+        select(CachedNews)
+        .where(CachedNews.jin10_time.like(f"{date}%"))
+        .order_by(CachedNews.jin10_time.desc())
+        .limit(20)
+    )
+    news = list(news_rows.scalars())
+
+    # blogger brief context (b, br, tickers)
+    blogger_brief_pairs = []
+    for br in blogger_briefs:
+        b = BY_SLUG.get(br.blogger_slug)
+        if b is None:
+            continue
+        try:
+            tickers_mentioned = _json.loads(br.mentioned_tickers or "[]")
+        except _json.JSONDecodeError:
+            tickers_mentioned = []
+        blogger_brief_pairs.append((b, br, tickers_mentioned))
+
+    return templates.TemplateResponse(
+        request=request,
+        name="report/history.html",
+        context={
+            "user": user,
+            "date": date,
+            "available_dates": available_dates,
+            "watch_display": watch_display,
+            "blogger_briefs": blogger_brief_pairs,
+            "news": news,
+        },
+    )
 
 
 @router.post("/ticker/{ticker}/refresh")

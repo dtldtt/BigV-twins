@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}赛博大V · 搜索{% if q %} · {{ q }}{% endif %}{% endblock %}
+
+{% block content %}
+<div style="display:flex; justify-content:space-between; align-items:baseline; margin:0.2rem 0 0.8rem; flex-wrap:wrap; gap:0.3rem">
+  <h2 style="margin:0">🔍 全站搜索</h2>
+  <form method="post" action="/search/rebuild" style="margin:0; display:inline"
+        onsubmit="return confirm('重建搜索索引（≈ 1-2 秒）？')">
+    <button type="submit" class="secondary outline" style="padding:0.25rem 0.7rem; font-size:0.78rem; margin:0">🔄 重建索引</button>
+  </form>
+</div>
+
+<form method="get" action="/search" class="search-form">
+  <input type="text" name="q" value="{{ q }}" placeholder="搜博主观点 / 自选股 brief / 金十事件…" autofocus required maxlength="100">
+  <select name="source">
+    <option value="">全部</option>
+    {% for s in sources %}
+      <option value="{{ s }}" {% if s == source %}selected{% endif %}>{{ source_labels[s] }}</option>
+    {% endfor %}
+  </select>
+  <button type="submit">搜索</button>
+</form>
+
+{% if q %}
+  <div style="margin:0.6rem 0 0.4rem">
+    <small class="muted">
+      关键词 <code>{{ q }}</code>{% if source %} · 限定 <code>{{ source_labels[source] }}</code>{% endif %}
+      · 命中 {{ results|length }} 条
+      {% if q|length < 3 %} · <span style="color:#b45309">⚠ 短关键词走 LIKE 兜底（不排序，仅按日期降序）</span>{% endif %}
+    </small>
+  </div>
+
+  {% if results %}
+    <div class="search-results">
+      {% for r in results %}
+        <article class="search-hit search-hit-{{ r.source }}">
+          <header style="display:flex; justify-content:space-between; align-items:baseline; gap:0.5rem; flex-wrap:wrap">
+            <strong>
+              {% if r.ref_url %}<a href="{{ r.ref_url }}" {% if r.source == 'news' %}target="_blank" rel="noopener"{% endif %}>{{ r.title }}</a>
+              {% else %}{{ r.title }}{% endif %}
+            </strong>
+            <small class="muted">
+              <span class="search-source-badge search-source-{{ r.source }}">{{ source_labels[r.source] }}</span>
+              {% if r.ref_date %} · {{ r.ref_date }}{% endif %}
+            </small>
+          </header>
+          <div class="search-snippet">{{ r.snippet | safe }}</div>
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <p class="muted" style="padding:1rem; text-align:center; background:#f9fafb; border-radius:6px">
+      没找到 <code>{{ q }}</code>。试试不同关键词，或者按上面的「重建索引」 — 也许刚生成的内容还没进索引。
+    </p>
+  {% endif %}
+{% else %}
+  <p class="muted" style="margin:0.6rem 0">
+    支持搜索：博主每日观点 · 自选股相关动态 brief · 金十重要事件。<br>
+    中文 ≥ 3 字命中最准（trigram 索引）；2 字关键词会走 LIKE 兜底也能匹配。
+  </p>
+{% endif %}
+
+<style>
+.search-form {
+  display: grid;
+  grid-template-columns: 1fr 8rem auto;
+  gap: 0.4rem;
+  margin: 0;
+  align-items: center;
+}
+.search-form > input,
+.search-form > select,
+.search-form > button { margin: 0; height: auto; padding: 0.45rem 0.7rem; font-size: 0.92rem; }
+.search-form > button { padding: 0.45rem 1.1rem; white-space: nowrap; }
+@media (max-width: 640px) {
+  .search-form { grid-template-columns: 1fr; }
+}
+
+.search-results { display: flex; flex-direction: column; gap: 0.5rem; margin-top: 0.6rem; }
+.search-hit {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 0.55rem 0.8rem;
+  margin: 0;
+  border-left: 4px solid #6b7280;
+  font-size: 0.88rem;
+  line-height: 1.55;
+}
+.search-hit-blogger_brief { border-left-color: #2563eb; }
+.search-hit-ticker_brief  { border-left-color: #dc2626; }
+.search-hit-news          { border-left-color: #16a34a; }
+.search-snippet {
+  margin-top: 0.3rem;
+  color: #374151;
+  font-size: 0.86rem;
+}
+.search-snippet mark {
+  background: #fef08a;
+  color: #713f12;
+  padding: 0 0.1rem;
+  border-radius: 2px;
+}
+.search-source-badge {
+  padding: 0.05rem 0.4rem; border-radius: 0.3rem; font-weight: 600; font-size: 0.72rem;
+}
+.search-source-blogger_brief { background: #dbeafe; color: #1e40af; }
+.search-source-ticker_brief  { background: #fee2e2; color: #991b1b; }
+.search-source-news          { background: #dcfce7; color: #166534; }
+</style>
+{% endblock %}
