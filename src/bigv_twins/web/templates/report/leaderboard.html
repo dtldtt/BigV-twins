@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}赛博大V · 博主胜率榜{% endblock %}
+
+{% block content %}
+<div style="display:flex; justify-content:space-between; align-items:baseline; margin:0.2rem 0 0.8rem; flex-wrap:wrap; gap:0.3rem">
+  <h2 style="margin:0">🏆 博主胜率榜</h2>
+  <div style="display:flex; gap:0.5rem; align-items:baseline">
+    <a href="/report" style="font-size:0.85rem">← 回投资日报</a>
+    <form method="post" action="/report/backtest/rebuild" style="margin:0; display:inline"
+          onsubmit="return confirm('重新计算所有博主的回测数据？这会调用 akshare 拉股价历史，大约耗时 30-60 秒，期间页面数据不变。')">
+      <button type="submit" class="secondary outline" style="padding:0.25rem 0.7rem; font-size:0.78rem; margin:0">🔄 重新计算</button>
+    </form>
+  </div>
+</div>
+
+<p class="muted" style="margin:0 0 0.8rem; padding:0.55rem 0.8rem; background:#fffbeb; border-left:3px solid #fbbf24; border-radius:5px; font-size:0.85rem">
+  <strong>怎么算的</strong>：博主在日报里提到某只股票 → 取那天的收盘价为「入场价」 →
+  {{ window }} 天后的收盘价为「出场价」 → 对照同期沪深300 →
+  跑赢沪深300 = 命中 (hit)。
+  <strong>注</strong>：纯 mention 不等于「推荐买入」，所以这只是博主提及的股票相对市场表现，不严格 = 选股能力，仅供参考。
+</p>
+
+{% if rows %}
+  <table style="font-size:0.88rem">
+    <thead>
+      <tr>
+        <th style="width:3rem">#</th>
+        <th>博主</th>
+        <th style="text-align:right">命中率</th>
+        <th style="text-align:right">已完成</th>
+        <th style="text-align:right">进行中</th>
+        <th style="text-align:right">平均超额</th>
+        <th style="text-align:right">股票均收益</th>
+        <th style="text-align:right">沪深300 均收益</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+        <tr {% if r.completes < 3 %}style="opacity:0.55"{% endif %}>
+          <td>{{ loop.index }}</td>
+          <td><strong>{{ r.name }}</strong> <small class="muted">{{ r.slug }}</small></td>
+          <td style="text-align:right; font-weight:600">
+            {% if r.completes %}
+              {% if r.hit_rate >= 60 %}<span style="color:#dc2626">{{ "%.1f"|format(r.hit_rate) }}%</span>
+              {% elif r.hit_rate >= 45 %}{{ "%.1f"|format(r.hit_rate) }}%
+              {% else %}<span style="color:#16a34a">{{ "%.1f"|format(r.hit_rate) }}%</span>{% endif %}
+            {% else %}<span class="muted">—</span>{% endif %}
+          </td>
+          <td style="text-align:right">{{ r.hits }} / {{ r.completes }}</td>
+          <td style="text-align:right; color:#6b7280">{{ r.pending }}</td>
+          <td style="text-align:right; font-weight:600">
+            {% if r.completes %}
+              {% if r.avg_excess > 0 %}<span style="color:#dc2626">+{{ "%.2f"|format(r.avg_excess) }}%</span>
+              {% else %}<span style="color:#16a34a">{{ "%.2f"|format(r.avg_excess) }}%</span>{% endif %}
+            {% else %}<span class="muted">—</span>{% endif %}
+          </td>
+          <td style="text-align:right">
+            {% if r.completes %}{{ "%+.2f"|format(r.avg_ticker_return) }}%{% else %}<span class="muted">—</span>{% endif %}
+          </td>
+          <td style="text-align:right; color:#6b7280">
+            {% if r.completes %}{{ "%+.2f"|format(r.avg_bench_return) }}%{% else %}<span class="muted">—</span>{% endif %}
+          </td>
+          <td><a href="/about/{{ r.slug }}/track-record" style="font-size:0.8rem">详情 →</a></td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted" style="margin-top:0.6rem; font-size:0.78rem">
+    透明度低于 3 单的博主以灰色显示（样本太少不能下结论）。<br>
+    红色 = 跑赢市场 / 高命中；绿色 = 跑输市场 / 低命中。
+  </p>
+{% else %}
+  <p class="muted" style="padding:1rem; text-align:center; background:#f9fafb; border-radius:6px">
+    还没回测数据。点上方 <strong>🔄 重新计算</strong> 触发一次（约 30-60 秒，期间可以喝杯水）。
+  </p>
+{% endif %}
+
+<style>
+table { width: 100%; background: #fff; border-collapse: collapse; }
+th { background: #f9fafb; padding: 0.4rem 0.5rem; text-align: left; font-size: 0.82rem; }
+td { padding: 0.35rem 0.5rem; border-top: 1px solid #f3f4f6; }
+@media (max-width: 640px) {
+  /* hide less-critical columns on phone */
+  th:nth-child(7), td:nth-child(7),
+  th:nth-child(8), td:nth-child(8) { display: none; }
+}
+</style>
+{% endblock %}

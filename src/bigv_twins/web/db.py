@@ -283,6 +283,40 @@ class TickerDailyBrief(Base):
     )
 
 
+class BacktestEntry(Base):
+    """每对 (blogger, brief_date, ticker, window_days) 的回测结果。
+
+    blogger 在某天的日报提到某 ticker 之后 N 天，该 ticker vs 沪深300 的超额收益。
+    每日 cron 计算新的；窗口未到期的 (exit_price NULL) 第二天接着算。
+    """
+    __tablename__ = "backtest_entries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    blogger_slug: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    brief_date: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
+    ticker: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    window_days: Mapped[int] = mapped_column(Integer, default=30, nullable=False)
+    # Actual prices/dates as fetched (next trading day if entry/exit is non-trading)
+    entry_date_actual: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    exit_date_actual: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    entry_price: Mapped[float | None] = mapped_column(nullable=True)
+    exit_price: Mapped[float | None] = mapped_column(nullable=True)
+    benchmark_entry: Mapped[float | None] = mapped_column(nullable=True)
+    benchmark_exit: Mapped[float | None] = mapped_column(nullable=True)
+    ticker_return: Mapped[float | None] = mapped_column(nullable=True)      # %
+    benchmark_return: Mapped[float | None] = mapped_column(nullable=True)   # %
+    excess_return: Mapped[float | None] = mapped_column(nullable=True)      # %
+    hit: Mapped[bool | None] = mapped_column(Boolean, nullable=True)         # True=excess>0
+    # 'complete' | 'pending' (窗口未到期) | 'no_data' (akshare 拉不到)
+    status: Mapped[str] = mapped_column(String(16), default="pending", nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("blogger_slug", "brief_date", "ticker", "window_days",
+                         name="uq_bt_slug_date_ticker_window"),
+    )
+
+
 _engine = create_async_engine(
     f"sqlite+aiosqlite:///{settings.chats_db_path}",
     echo=False,

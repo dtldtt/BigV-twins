@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}赛博大V · {{ blogger.name }} 战绩{% endblock %}
+
+{% block content %}
+<div style="display:flex; justify-content:space-between; align-items:baseline; margin:0.2rem 0 0.8rem; flex-wrap:wrap; gap:0.3rem">
+  <h2 style="margin:0">📈 {{ blogger.name }} · 战绩</h2>
+  <div style="display:flex; gap:0.5rem; align-items:baseline">
+    <a href="/about/{{ blogger.slug }}" style="font-size:0.85rem">← 博主主页</a>
+    <a href="/report/leaderboard" style="font-size:0.85rem">🏆 总榜</a>
+  </div>
+</div>
+
+<section style="margin-bottom:1rem">
+  <div class="stat-grid">
+    <div class="stat-card">
+      <div class="stat-label">命中率</div>
+      <div class="stat-value">
+        {% if summary.completes %}{{ "%.1f"|format(summary.hit_rate) }}%{% else %}—{% endif %}
+      </div>
+      <div class="stat-sub">{{ summary.hits }} / {{ summary.completes }} 单</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">平均超额收益</div>
+      <div class="stat-value {% if summary.avg_excess > 0 %}up{% elif summary.avg_excess < 0 %}down{% endif %}">
+        {% if summary.completes %}{{ "%+.2f"|format(summary.avg_excess) }}%{% else %}—{% endif %}
+      </div>
+      <div class="stat-sub">vs 沪深300，{{ window }} 天窗口</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">最强一单</div>
+      <div class="stat-value up">
+        {% if summary.completes %}{{ "%+.2f"|format(summary.best_excess) }}%{% else %}—{% endif %}
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">最弱一单</div>
+      <div class="stat-value down">
+        {% if summary.completes %}{{ "%+.2f"|format(summary.worst_excess) }}%{% else %}—{% endif %}
+      </div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">未到期 / 计算中</div>
+      <div class="stat-value" style="color:#6b7280">{{ summary.pending }}</div>
+      <div class="stat-sub">{{ window }} 天窗口未结束</div>
+    </div>
+  </div>
+</section>
+
+{% if records %}
+  <h3 style="margin:0.8rem 0 0.4rem; font-size:1.02rem">逐单明细（按日期降序）</h3>
+  <table style="font-size:0.86rem">
+    <thead>
+      <tr>
+        <th style="width:6.5rem">提及日</th>
+        <th>股票</th>
+        <th style="text-align:right">入场</th>
+        <th style="text-align:right">出场</th>
+        <th style="text-align:right">股票收益</th>
+        <th style="text-align:right">沪深300</th>
+        <th style="text-align:right">超额</th>
+        <th>结果</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in records %}
+        <tr>
+          <td>{{ r.brief_date }}</td>
+          <td><code>{{ r.ticker }}</code></td>
+          <td style="text-align:right">{% if r.entry_price %}{{ "%.2f"|format(r.entry_price) }}{% else %}—{% endif %}</td>
+          <td style="text-align:right">{% if r.exit_price %}{{ "%.2f"|format(r.exit_price) }}{% else %}—{% endif %}</td>
+          <td style="text-align:right">
+            {% if r.ticker_return is not none %}
+              <span class="{% if r.ticker_return > 0 %}up{% elif r.ticker_return < 0 %}down{% endif %}">
+                {{ "%+.2f"|format(r.ticker_return) }}%
+              </span>
+            {% else %}<span class="muted">—</span>{% endif %}
+          </td>
+          <td style="text-align:right; color:#6b7280">
+            {% if r.benchmark_return is not none %}{{ "%+.2f"|format(r.benchmark_return) }}%{% else %}—{% endif %}
+          </td>
+          <td style="text-align:right; font-weight:600">
+            {% if r.excess_return is not none %}
+              <span class="{% if r.excess_return > 0 %}up{% elif r.excess_return < 0 %}down{% endif %}">
+                {{ "%+.2f"|format(r.excess_return) }}%
+              </span>
+            {% else %}<span class="muted">—</span>{% endif %}
+          </td>
+          <td>
+            {% if r.status == 'complete' %}
+              {% if r.hit %}<span class="badge badge-hit">命中</span>
+              {% else %}<span class="badge badge-miss">未中</span>{% endif %}
+            {% elif r.status == 'pending' %}<span class="badge badge-pending">进行中</span>
+            {% elif r.status == 'no_data' %}<span class="badge badge-na">无数据</span>
+            {% else %}<span class="badge badge-na">{{ r.status }}</span>{% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% else %}
+  <p class="muted" style="padding:1rem; text-align:center; background:#f9fafb; border-radius:6px">
+    {{ blogger.name }} 还没有任何回测记录。可能他日报里从没提过股票（或没提过 A 股 6 位代码），
+    也可能回测还没跑过 — 去 <a href="/report/leaderboard">总榜</a> 点 🔄 重新计算。
+  </p>
+{% endif %}
+
+<style>
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.5rem;
+}
+.stat-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  padding: 0.6rem 0.8rem;
+}
+.stat-label { font-size: 0.78rem; color: #6b7280; }
+.stat-value { font-size: 1.4rem; font-weight: 700; margin-top: 0.15rem; line-height: 1.2; }
+.stat-value.up { color: #dc2626; }
+.stat-value.down { color: #16a34a; }
+.stat-sub { font-size: 0.74rem; color: #9ca3af; margin-top: 0.1rem; }
+
+table { width: 100%; background: #fff; border-collapse: collapse; }
+th { background: #f9fafb; padding: 0.35rem 0.5rem; text-align: left; font-size: 0.8rem; }
+td { padding: 0.3rem 0.5rem; border-top: 1px solid #f3f4f6; vertical-align: middle; }
+.up { color: #dc2626; }
+.down { color: #16a34a; }
+.badge {
+  display: inline-block; padding: 0.05rem 0.4rem; border-radius: 0.3rem;
+  font-size: 0.75rem; font-weight: 600;
+}
+.badge-hit { background: #fee2e2; color: #b91c1c; }
+.badge-miss { background: #dcfce7; color: #15803d; }
+.badge-pending { background: #fef3c7; color: #92400e; }
+.badge-na { background: #f3f4f6; color: #6b7280; }
+
+@media (max-width: 640px) {
+  th:nth-child(3), td:nth-child(3),
+  th:nth-child(4), td:nth-child(4),
+  th:nth-child(6), td:nth-child(6) { display: none; }
+}
+</style>
+{% endblock %}

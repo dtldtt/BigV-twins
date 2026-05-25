@@ -25,6 +25,7 @@ from .auth_routes import router as auth_router
 from .chat import router as chat_router
 from .db import User
 from .multi import router as multi_router
+from .backtest import about_track_router, compute_all_entries, router as backtest_router
 from .blogger_brief import generate_briefs_for_day
 from .news_scraper import refresh_jin10_news
 from .report import router as report_router
@@ -45,6 +46,11 @@ async def _refresh_jin10_and_index() -> None:
 async def _generate_blogger_briefs_and_index() -> None:
     await generate_briefs_for_day()
     await rebuild_search_index()
+    # Also compute backtest entries for any new ticker mentions
+    try:
+        await compute_all_entries()
+    except Exception as e:
+        logging.getLogger("bigv_twins.web").warning("backtest compute failed: %s", e)
 
 
 async def _generate_ticker_briefs_and_index() -> None:
@@ -116,6 +122,8 @@ def create_app() -> FastAPI:
     app.include_router(chat_router)
     app.include_router(multi_router)
     app.include_router(report_router)
+    app.include_router(backtest_router)         # /report/leaderboard etc.
+    app.include_router(about_track_router)      # /about/<slug>/track-record
     app.include_router(search_router)
     app.include_router(admin_router)
     app.include_router(about_router)
