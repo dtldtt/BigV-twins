@@ -12,9 +12,9 @@
   {% for b in bloggers %}
     {% if b.is_advisor %}
       <article style="background:linear-gradient(135deg,#7c3aed 0%,#2563eb 100%); color:#fff; border:1px solid #6d28d9; box-shadow:0 4px 12px rgba(124,58,237,0.25)">
-        <header style="margin-bottom:0.4rem">
+        <header style="margin-bottom:0.4rem; background:transparent; color:#fff; border:none; padding:0">
           <a href="/about/{{ b.slug }}" style="text-decoration:none; color:#fff">
-            <strong style="font-size:1.05rem">🤖 {{ b.name }}</strong>
+            <strong style="font-size:1.05rem; color:#fff">🤖 {{ b.name }}</strong>
           </a>
           <span style="display:inline-block; margin-left:0.4rem; padding:0.05rem 0.4rem; font-size:0.7rem; background:rgba(255,255,255,0.2); border-radius:0.6rem; vertical-align:middle">对照组</span>
         </header>
@@ -30,9 +30,9 @@
       </article>
     {% elif b.is_master %}
       <article style="background:linear-gradient(135deg,#b45309 0%,#92400e 100%); color:#fff; border:1px solid #78350f; box-shadow:0 4px 12px rgba(180,83,9,0.25)">
-        <header style="margin-bottom:0.4rem">
+        <header style="margin-bottom:0.4rem; background:transparent; color:#fff; border:none; padding:0">
           <a href="/about/{{ b.slug }}" style="text-decoration:none; color:#fff">
-            <strong style="font-size:1.05rem">📜 {{ b.name }}</strong>
+            <strong style="font-size:1.05rem; color:#fff">📜 {{ b.name }}</strong>
           </a>
           <span style="display:inline-block; margin-left:0.4rem; padding:0.05rem 0.4rem; font-size:0.7rem; background:rgba(255,255,255,0.2); border-radius:0.6rem; vertical-align:middle">大师归档</span>
         </header>
