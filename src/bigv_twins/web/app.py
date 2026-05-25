@@ -41,10 +41,10 @@ async def lifespan(app: FastAPI):
     # APScheduler — periodic background jobs (jin10 refresh / daily blogger brief).
     # Stored in a module-level dict so we can shut it down cleanly on lifespan exit.
     scheduler = AsyncIOScheduler(timezone="Asia/Shanghai")
-    # Refresh jin10 news every 30 min; also kick off once at startup so a
+    # Refresh jin10 news every 4 hours; also kick off once at startup so a
     # freshly-restarted server isn't empty
-    scheduler.add_job(refresh_jin10_news, IntervalTrigger(minutes=30), id="jin10_news",
-                      misfire_grace_time=300, replace_existing=True)
+    scheduler.add_job(refresh_jin10_news, IntervalTrigger(hours=4), id="jin10_news",
+                      misfire_grace_time=600, replace_existing=True)
     scheduler.add_job(refresh_jin10_news, "date", id="jin10_news_initial",
                       replace_existing=True)
     # Daily blogger brief at 03:30 (after zhihu daily timer 03:01 + bigv-twins
@@ -52,9 +52,9 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(generate_briefs_for_day, CronTrigger(hour=3, minute=30),
                       id="blogger_brief_daily",
                       misfire_grace_time=3600, replace_existing=True)
-    # Per-ticker brief refreshed 3x daily; UPSERT same-day row (内容随交易日变厚)
-    #   08:00 — 昨日收盘+隔夜消息  12:30 — 加上当日早盘  18:00 — 全天数据
-    for hh, mm, jid in ((8, 0, "morning"), (12, 30, "midday"), (18, 0, "evening")):
+    # Per-ticker brief refreshed 2x daily; UPSERT same-day row
+    #   08:00 — 昨日收盘+隔夜消息  19:00 — 当日全天数据（收盘后 +1h）
+    for hh, mm, jid in ((8, 0, "morning"), (19, 0, "evening")):
         scheduler.add_job(generate_ticker_briefs_for_day,
                           CronTrigger(hour=hh, minute=mm),
                           id=f"ticker_brief_{jid}",
