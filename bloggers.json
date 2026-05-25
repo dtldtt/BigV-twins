@@ -51,11 +51,35 @@
   },
   {
     "slug": "buffett",
-    "name": "Warren Buffett",
+    "name": "沃伦·巴菲特",
     "tagline": "致股东信 (1977-) + 股东大会 Q&A (1994-) · 价值投资 · 能力圈 · 护城河",
     "kind": "master",
     "agent": "bigv",
     "source": "letters"
+  },
+  {
+    "slug": "munger",
+    "name": "查理·芒格",
+    "tagline": "心智模型 · 多学科思维 · 25 个认知偏差 ·「反过来想，永远反过来想」",
+    "kind": "master",
+    "agent": "bigv",
+    "source": "speeches+book"
+  },
+  {
+    "slug": "graham",
+    "name": "本杰明·格雷厄姆",
+    "tagline": "价值投资奠基 · 安全边际 · 内在价值 · 防御型 vs 进攻型投资者",
+    "kind": "master",
+    "agent": "bigv",
+    "source": "books"
+  },
+  {
+    "slug": "lynch",
+    "name": "彼得·林奇",
+    "tagline": "麦哲伦基金传奇 · 投资身边的好公司 · 增长股 · 普通投资者也能跑赢专家",
+    "kind": "master",
+    "agent": "bigv",
+    "source": "books"
   },
   {
     "slug": "advisor",
