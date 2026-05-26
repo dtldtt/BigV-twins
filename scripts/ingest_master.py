@@ -77,16 +77,22 @@ def _classify_kind(filename: str, meta: dict) -> str:
         return "book" if kind == "book" else "speech"
     if filename.startswith("book-"):
         return "book"
-    # 4-digit-year prefix strongly suggests a speech / dated piece
     if re.match(r"^\d{4}", filename):
         return "speech"
     return "book"
 
 
-def _file_url(slug: str, filename: str, kind: str) -> str:
-    """Citation URL for a file (rendered by zhihu archive site once routes wired up)."""
+def _speech_url(slug: str, filename: str) -> str:
     stem = Path(filename).stem
-    return f"/masters/{slug}/{kind}/{stem}"
+    return f"/masters/{slug}/speech/{stem}"
+
+
+def _book_chapter_url(slug: str, book_dir: str, chapter_filename: str) -> str:
+    """URL for a single chapter, e.g.
+    /masters/munger/book/《穷查理宝典》/05-鸣谢
+    """
+    stem = Path(chapter_filename).stem
+    return f"/masters/{slug}/book/{book_dir}/{stem}"
 
 
 def _insert_chunk(
@@ -114,70 +120,129 @@ def _insert_chunk(
     )
 
 
-def _ingest_one_file(
+def _ingest_speech_file(
     path: Path,
     slug: str,
     dst: sqlite3.Connection,
     embedder: Embedder,
 ) -> int:
-    """Read one markdown file, chunk, embed, insert. Returns chunk count."""
+    """Read one speech markdown (flat file in markdown/ dir), chunk, embed."""
     md = path.read_text(encoding="utf-8")
     meta, body = _parse_frontmatter(md)
     if not body.strip():
         return 0
-    kind = _classify_kind(path.name, meta)
     file_hash = _short_hash(path.name)
+    year = meta.get("year") or _maybe_year_from_filename(path.name) or "1970"
+    speech_title = meta.get("title", path.stem)
+    url = _speech_url(slug, path.name)
 
-    # Try header-based split. If the file has no `#`/`##` headers (rare; e.g.
-    # speech with single big body), fall back to sliding-window plain chunks.
     sections = split_markdown_sections(
         body,
         chunk_size=settings.chunk_size,
         chunk_overlap=settings.chunk_overlap,
-        min_level=1,
-        max_level=2,
+        min_level=1, max_level=2,
     )
     if not sections:
-        # plain fallback
-        plain_chunks = chunk_text(body, size=settings.chunk_size, overlap=settings.chunk_overlap)
-        if not plain_chunks:
+        chunks = chunk_text(body, size=settings.chunk_size, overlap=settings.chunk_overlap)
+        if not chunks:
             return 0
-        embeddings = embedder.encode_passages([c.text for c in plain_chunks])
-        for c, emb in zip(plain_chunks, embeddings):
-            sid = f"{kind}-{file_hash}-c{c.chunk_index:04d}"
-            title = meta.get("title", path.stem)
-            year = meta.get("year") or _maybe_year_from_filename(path.name)
+        embeddings = embedder.encode_passages([c.text for c in chunks])
+        for c, emb in zip(chunks, embeddings):
+            sid = f"speech-{file_hash}-c{c.chunk_index:04d}"
             _insert_chunk(
-                dst,
-                source_id=sid, chunk_index=c.chunk_index, content_type=kind,
-                title=title, text=c.text,
-                url=_file_url(slug, path.name, kind),
-                column_title=meta.get("title", path.stem),
-                created_time=f"{year}-01-01" if year else "1970-01-01",
-                embedding=emb,
+                dst, source_id=sid, chunk_index=c.chunk_index, content_type="speech",
+                title=speech_title[:240], text=c.text, url=url,
+                column_title=speech_title[:80],
+                created_time=f"{year}-01-01", embedding=emb,
             )
-        return len(plain_chunks)
+        return len(chunks)
 
-    # Header-based: each section produces 1+ chunks
     all_chunks = [(s, c) for s in sections for c in s.chunks]
     if not all_chunks:
         return 0
     embeddings = embedder.encode_passages([c.text for _s, c in all_chunks])
-    year = meta.get("year") or _maybe_year_from_filename(path.name)
-    book_or_speech_title = meta.get("title", path.stem)
-
     for idx, ((sec, chunk), emb) in enumerate(zip(all_chunks, embeddings)):
-        sid = f"{kind}-{file_hash}-c{idx:04d}"
-        # Title: include section title for context if we have one
-        title = f"{book_or_speech_title} — {sec.title}" if sec.title else book_or_speech_title
+        sid = f"speech-{file_hash}-c{idx:04d}"
+        title = f"{speech_title} — {sec.title}" if sec.title else speech_title
         _insert_chunk(
-            dst,
-            source_id=sid, chunk_index=chunk.chunk_index, content_type=kind,
-            title=title[:240], text=chunk.text,
-            url=_file_url(slug, path.name, kind),
-            column_title=book_or_speech_title[:80],
-            created_time=f"{year}-01-01" if year else "1970-01-01",
-            embedding=emb,
+            dst, source_id=sid, chunk_index=chunk.chunk_index, content_type="speech",
+            title=title[:240], text=chunk.text, url=url,
+            column_title=speech_title[:80],
+            created_time=f"{year}-01-01", embedding=emb,
+        )
+    return len(all_chunks)
+
+
+def _ingest_book_chapter(
+    chapter_path: Path,
+    slug: str,
+    book_meta: dict,
+    book_dir_name: str,
+    dst: sqlite3.Connection,
+    embedder: Embedder,
+) -> int:
+    """Read one chapter markdown from a book's《...》/ dir, chunk, embed.
+
+    The book dir contains _meta.json (book-level info) + NN-章名.md files.
+    Each chapter has YAML frontmatter with chapter_idx / chapter_title / part.
+    """
+    md = chapter_path.read_text(encoding="utf-8")
+    chap_meta, body = _parse_frontmatter(md)
+    if not body.strip():
+        return 0
+
+    book_title = book_meta.get("title", book_dir_name)
+    chapter_idx_str = chap_meta.get("chapter_idx", "00")
+    try:
+        chapter_idx = int(chapter_idx_str)
+    except (ValueError, TypeError):
+        chapter_idx = 0
+    chapter_title = chap_meta.get("chapter_title", chapter_path.stem)
+    part = chap_meta.get("part") or ""
+
+    book_hash = _short_hash(book_dir_name)
+    url = _book_chapter_url(slug, book_dir_name, chapter_path.name)
+    # column_title 是 chat citation 显示的「来源」短标签
+    if part:
+        column_title = f"{book_title} · {part} · {chapter_title}"
+    else:
+        column_title = f"{book_title} · {chapter_title}"
+
+    sections = split_markdown_sections(
+        body,
+        chunk_size=settings.chunk_size,
+        chunk_overlap=settings.chunk_overlap,
+        min_level=1, max_level=3,
+    )
+    if not sections:
+        chunks = chunk_text(body, size=settings.chunk_size, overlap=settings.chunk_overlap)
+        if not chunks:
+            return 0
+        embeddings = embedder.encode_passages([c.text for c in chunks])
+        for c, emb in zip(chunks, embeddings):
+            sid = f"book-{book_hash}-ch{chapter_idx:02d}-c{c.chunk_index:04d}"
+            _insert_chunk(
+                dst, source_id=sid, chunk_index=c.chunk_index, content_type="book",
+                title=f"{book_title} {chapter_title}"[:240],
+                text=c.text, url=url, column_title=column_title[:80],
+                created_time="1970-01-01", embedding=emb,
+            )
+        return len(chunks)
+
+    all_chunks = [(s, c) for s in sections for c in s.chunks]
+    if not all_chunks:
+        return 0
+    embeddings = embedder.encode_passages([c.text for _s, c in all_chunks])
+    for idx, ((sec, chunk), emb) in enumerate(zip(all_chunks, embeddings)):
+        sid = f"book-{book_hash}-ch{chapter_idx:02d}-c{idx:04d}"
+        title = f"{book_title} {chapter_title}"
+        if sec.title and sec.title != chapter_title:
+            title = f"{title} — {sec.title}"
+        _insert_chunk(
+            dst, source_id=sid, chunk_index=chunk.chunk_index, content_type="book",
+            title=title[:240], text=chunk.text, url=url,
+            column_title=column_title[:80],
+            created_time="1970-01-01", embedding=emb,
         )
     return len(all_chunks)
 
@@ -193,17 +258,36 @@ def ingest_master(slug: str, data_dir: Path,
                    rebuild: bool = False) -> int:
     """Main entry. Returns total chunks added.
 
-    Output db is at ``settings.twin_db_path(slug)`` — typically
-    ``<BigV-twins>/twins/<slug>.db``.
+    Walks two kinds of content in <data_dir>/markdown/:
+      - 《book-name》/  (directory)  → book chapters (uses _meta.json + each chapter)
+      - speeches/<NN>.md  (in speeches subdir)  → speech files
+      - <flat>.md  (top-level flat md, NOT under speeches/)  → also treated as speech
+        (for backward compat, like the early Munger fs.blog md before reorg)
+
+    Output db is at ``settings.twin_db_path(slug)``.
     """
     md_dir = data_dir / "markdown"
     if not md_dir.exists():
         raise SystemExit(f"markdown dir not found: {md_dir}\n"
-                         f"run scripts/convert_books.py first")
-    md_files = sorted(p for p in md_dir.glob("*.md"))
-    if not md_files:
-        raise SystemExit(f"no .md files in {md_dir}")
-    log.info("[%s] %d markdown files to ingest", slug, len(md_files))
+                         f"run scripts/convert_books.py + rebuild_books.py first")
+
+    # Collect books (subdirs named 《...》)
+    book_dirs = [p for p in md_dir.iterdir() if p.is_dir() and p.name.startswith("《")]
+    # Collect speeches: speeches/ subdir's .md files + flat .md files at top level
+    speech_files: list[Path] = []
+    speeches_dir = md_dir / "speeches"
+    if speeches_dir.is_dir():
+        speech_files.extend(sorted(speeches_dir.glob("*.md")))
+    # Flat top-level .md files = speech-style. Skip the OLD `book-*.md` flat
+    # files that have been superseded by the《...》/ chapter dirs.
+    for p in sorted(md_dir.glob("*.md")):
+        if p.is_file() and not p.name.startswith("book-"):
+            speech_files.append(p)
+
+    if not book_dirs and not speech_files:
+        raise SystemExit(f"no content in {md_dir}")
+
+    log.info("[%s] %d books + %d speeches to ingest", slug, len(book_dirs), len(speech_files))
 
     embedder = Embedder(model_name=model_name, device=device)
     log.info("[%s] embedder %s loaded (dim=%d)", slug, model_name, embedder.dim)
@@ -211,15 +295,43 @@ def ingest_master(slug: str, data_dir: Path,
     dst = _open_twin_rw(slug, embedder=embedder, rebuild=rebuild)
     dst_path = settings.twin_db_path(slug)
 
+    import json as _json
     total = 0
-    for path in tqdm(md_files, desc=f"{slug}", unit="file"):
+
+    # 1) Speeches (flat md files at top level OR in speeches/ subdir)
+    for path in tqdm(speech_files, desc=f"{slug} speeches", unit="file"):
         try:
-            n = _ingest_one_file(path, slug, dst, embedder)
+            n = _ingest_speech_file(path, slug, dst, embedder)
             total += n
             dst.commit()
-            log.info("[%s] %s → %d chunks", slug, path.name, n)
+            log.info("[%s] speech %s → %d chunks", slug, path.name, n)
         except Exception as e:
-            log.exception("[%s] %s failed: %s", slug, path.name, e)
+            log.exception("[%s] speech %s failed: %s", slug, path.name, e)
+
+    # 2) Books (each 《...》/ dir has _meta.json + chapter md files)
+    for book_dir in tqdm(book_dirs, desc=f"{slug} books", unit="book"):
+        meta_path = book_dir / "_meta.json"
+        if meta_path.is_file():
+            try:
+                book_meta = _json.loads(meta_path.read_text(encoding="utf-8"))
+            except Exception as e:
+                log.warning("[%s] failed to read %s: %s", slug, meta_path, e)
+                book_meta = {"title": book_dir.name}
+        else:
+            book_meta = {"title": book_dir.name}
+        book_chunks = 0
+        for chapter_path in sorted(book_dir.glob("*.md")):
+            try:
+                n = _ingest_book_chapter(
+                    chapter_path, slug, book_meta, book_dir.name, dst, embedder
+                )
+                total += n
+                book_chunks += n
+                dst.commit()
+            except Exception as e:
+                log.exception("[%s] book chapter %s failed: %s",
+                              slug, chapter_path.name, e)
+        log.info("[%s] book %s → %d chunks", slug, book_dir.name, book_chunks)
 
     # Write meta
     dst.execute(
