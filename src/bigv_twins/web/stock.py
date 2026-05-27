@@ -53,7 +53,14 @@ async def stock_page(
     session: Annotated[AsyncSession, Depends(db.get_session)],
 ):
     """个股研究聚合页。"""
+    log.info("=== stock_page ENTERED ticker=%s user_id=%s ===", ticker, user.id)
     import asyncio
+
+    # If ticker is a Chinese name (not a code), resolve and redirect to code URL
+    if not ticker.isdigit():
+        info = resolve_ticker(ticker)
+        if info and info.code != ticker:
+            return RedirectResponse(f"/stock/{info.code}", status_code=302)
 
     # 1. Real-time quote + fundamentals (reuse tencent API)
     quotes = await asyncio.to_thread(get_watchlist_quotes, [_FakeWatchlistItem(ticker)])
@@ -113,16 +120,36 @@ async def stock_page(
         })
 
     # 5. User's journal entries for this ticker (match code OR name)
+    # Also resolve the name for matching (user might have stored by name)
+    _resolved = resolve_ticker(ticker)
+    _match_values = [ticker]
+    if _resolved and _resolved.name != ticker:
+        _match_values.append(_resolved.name)
     journal_rows = await session.execute(
         select(DecisionJournal).where(
             DecisionJournal.user_id == user.id,
             or_(
-                DecisionJournal.ticker == ticker,
-                DecisionJournal.ticker_name == ticker,
+                DecisionJournal.ticker.in_(_match_values),
+                DecisionJournal.ticker_name.in_(_match_values),
             ),
         ).order_by(DecisionJournal.created_at.desc()).limit(10)
     )
-    journal_entries = list(journal_rows.scalars())
+    _raw_entries = list(journal_rows.scalars())
+    log.info("stock page ticker=%s user=%s journal_entries=%d", ticker, user.id, len(_raw_entries))
+    # Eagerly extract attributes to avoid lazy-load issues after session closes
+    journal_entries = []
+    for j in _raw_entries:
+        journal_entries.append({
+            "id": j.id,
+            "action": j.action,
+            "price_at_decision": j.price_at_decision,
+            "shares": j.shares,
+            "created_at": j.created_at,
+            "reasoning": j.reasoning,
+            "action_detail": j.action_detail,
+            "target_price": j.target_price,
+            "stop_loss_price": j.stop_loss_price,
+        })
 
     # Determine ticker type for conditional display
     is_etf = _is_etf(ticker)
