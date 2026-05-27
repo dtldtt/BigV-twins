@@ -132,6 +132,10 @@ def create_app() -> FastAPI:
     app.include_router(journal_router)
     app.include_router(stock_router)
 
+    @app.get("/changelog", response_class=HTMLResponse)
+    async def changelog_page(request: Request):
+        return TEMPLATES.TemplateResponse(request=request, name="changelog.html", context={})
+
     @app.get("/", response_class=HTMLResponse)
     async def home(
         request: Request,

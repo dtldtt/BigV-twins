@@ -95,20 +95,20 @@ async def stock_page(
     bt_rows = await session.execute(
         select(BacktestEntry).where(
             BacktestEntry.ticker == ticker
-        ).order_by(BacktestEntry.entry_date.desc()).limit(10)
+        ).order_by(BacktestEntry.brief_date.desc()).limit(10)
     )
     backtests = []
     for bt in bt_rows.scalars():
         blogger = BY_SLUG.get(bt.blogger_slug)
         backtests.append({
             "blogger_name": blogger.name if blogger else bt.blogger_slug,
-            "entry_date": bt.entry_date,
+            "entry_date": bt.entry_date_actual or bt.brief_date,
             "entry_price": bt.entry_price,
             "exit_price": bt.exit_price,
             "ticker_return": bt.ticker_return,
             "bench_return": bt.bench_return,
             "excess_return": bt.excess_return,
-            "status": bt.status,
+            "status": "complete" if bt.exit_price else "pending",
         })
 
     # Stock name: prefer from quote, fallback to ticker

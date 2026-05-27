@@ -2,15 +2,50 @@
 {% block title %}投资决策日志 · 赛博大V{% endblock %}
 
 {% block content %}
-<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem">
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem">
   <h2 style="margin:0">📝 投资决策日志</h2>
-  <a href="/journal/new" role="button">+ 新建决策记录</a>
+  <a href="/journal/new" role="button">+ 新建记录</a>
 </div>
 
-<div style="margin-bottom:1rem">
-  <a href="/journal?status=active" class="{% if status_filter == 'active' %}contrast{% endif %}" style="margin-right:0.8rem">持仓中</a>
-  <a href="/journal?status=closed" class="{% if status_filter == 'closed' %}contrast{% endif %}" style="margin-right:0.8rem">已平仓</a>
+<!-- Total Capital Setting -->
+<div class="capital-bar">
+  <form method="post" action="/journal/capital" style="display:flex; align-items:center; gap:0.5rem; margin:0">
+    <label style="margin:0; font-size:0.85rem; white-space:nowrap">总资金：</label>
+    <input type="number" name="total_capital" value="{{ total_capital or '' }}" step="0.1" min="0"
+           placeholder="万元" style="width:6rem; margin:0; padding:0.3rem 0.5rem; font-size:0.85rem">
+    <button type="submit" style="padding:0.3rem 0.6rem; font-size:0.8rem; margin:0">设定</button>
+    {% if total_capital %}<small class="muted">当前 {{ "%.1f"|format(total_capital) }} 万</small>{% endif %}
+  </form>
+</div>
+
+<!-- Portfolio Overview (only active positions) -->
+{% if portfolio %}
+<section class="portfolio-section">
+  <h3 style="margin-bottom:0.8rem">💼 实时持仓</h3>
+  <table class="portfolio-table">
+    <thead>
+      <tr><th>股票</th><th>持仓(股)</th><th>现价</th><th>市值</th>{% if total_capital %}<th>占比</th>{% endif %}</tr>
+    </thead>
+    <tbody>
+      {% for p in portfolio %}
+      <tr>
+        <td><strong>{{ p.name }}</strong> <code>{{ p.ticker }}</code></td>
+        <td>{{ p.shares }}</td>
+        <td>{% if p.current_price %}¥{{ "%.2f"|format(p.current_price) }}{% else %}—{% endif %}</td>
+        <td>{% if p.market_value %}¥{{ "%.0f"|format(p.market_value) }}{% else %}—{% endif %}</td>
+        {% if total_capital %}<td>{% if p.pct_of_total %}{{ "%.1f%%"|format(p.pct_of_total) }}{% else %}—{% endif %}</td>{% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+<!-- Journal Entries -->
+<div style="margin:1.5rem 0 0.8rem; display:flex; gap:0.8rem; font-size:0.85rem">
   <a href="/journal?status=all" class="{% if status_filter == 'all' %}contrast{% endif %}">全部</a>
+  <a href="/journal?status=active" class="{% if status_filter == 'active' %}contrast{% endif %}">持仓中</a>
+  <a href="/journal?status=closed" class="{% if status_filter == 'closed' %}contrast{% endif %}">已了结</a>
 </div>
 
 {% if journals %}
@@ -21,20 +56,20 @@
       <strong>{{ j.ticker_name }}</strong>
       <code>{{ j.ticker }}</code>
       <span class="journal-action journal-action-{{ j.action }}">
-        {% if j.action == 'buy' %}买入{% elif j.action == 'sell' %}卖出{% elif j.action == 'add' %}加仓{% elif j.action == 'reduce' %}减仓{% else %}{{ j.action }}{% endif %}
+        {% if j.action == 'open' %}建仓{% elif j.action == 'add' %}加仓{% elif j.action == 'reduce' %}减仓{% elif j.action == 'close' %}清仓{% elif j.action == 'retroactive' %}补录{% else %}{{ j.action }}{% endif %}
       </span>
     </div>
     <div class="journal-card-body">
       <div class="journal-price-row">
-        <span>决策价: ¥{{ "%.2f"|format(j.price_at_decision) if j.price_at_decision else "—" }}</span>
-        {% if j.status == 'active' and price_map.get(j.ticker) %}
+        <span>{% if j.action == 'retroactive' %}成本{% else %}决策价{% endif %}: ¥{{ "%.2f"|format(j.price_at_decision) if j.price_at_decision else "—" }}{% if j.shares %} · {{ j.shares }}股{% endif %}</span>
+        {% if j.status == 'active' and price_map.get(j.ticker) and j.price_at_decision %}
           {% set cur = price_map[j.ticker] %}
-          {% set pnl = ((cur - j.price_at_decision) / j.price_at_decision * 100) if j.price_at_decision else 0 %}
+          {% set pnl = ((cur - j.price_at_decision) / j.price_at_decision * 100) %}
           <span class="journal-pnl {% if pnl > 0 %}up{% elif pnl < 0 %}down{% endif %}">
             现价 ¥{{ "%.2f"|format(cur) }} ({{ "%+.1f%%"|format(pnl) }})
           </span>
-        {% elif j.status == 'closed' and j.closed_price %}
-          {% set pnl = ((j.closed_price - j.price_at_decision) / j.price_at_decision * 100) if j.price_at_decision else 0 %}
+        {% elif j.status == 'closed' and j.closed_price and j.price_at_decision %}
+          {% set pnl = ((j.closed_price - j.price_at_decision) / j.price_at_decision * 100) %}
           <span class="journal-pnl {% if pnl > 0 %}up{% elif pnl < 0 %}down{% endif %}">
             平仓 ¥{{ "%.2f"|format(j.closed_price) }} ({{ "%+.1f%%"|format(pnl) }})
           </span>
@@ -49,20 +84,26 @@
 {% else %}
 <div style="text-align:center; padding:3rem; color:#888">
   <p>还没有决策记录。</p>
-  <p>下次做买卖决策时，花 2 分钟记录下来——三个月后你会感谢自己的。</p>
+  <p>下次做买卖决策时，花 2 分钟记录下来。</p>
   <a href="/journal/new" role="button">创建第一条记录</a>
 </div>
 {% endif %}
 
 <style>
+.capital-bar { background:#f0f7ff; border:1px solid #cce5ff; border-radius:6px; padding:0.6rem 1rem; margin-bottom:1.2rem; }
+.portfolio-section { margin-bottom:1.5rem; }
+.portfolio-table { width:100%; border-collapse:collapse; font-size:0.85rem; }
+.portfolio-table th, .portfolio-table td { padding:0.5rem 0.8rem; border-bottom:1px solid #eee; }
+.portfolio-table th { background:#f8f9fa; text-align:left; font-size:0.75rem; color:#888; }
 .journal-grid { display:flex; flex-direction:column; gap:0.8rem; }
 .journal-card { display:block; padding:1rem; border:1px solid #e0e0e0; border-radius:8px; text-decoration:none; color:inherit; transition:box-shadow 0.15s; }
 .journal-card:hover { box-shadow:0 2px 8px rgba(0,0,0,0.08); }
 .journal-closed { opacity:0.7; border-style:dashed; }
 .journal-card-head { display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem; }
-.journal-action { font-size:0.75rem; padding:0.15rem 0.5rem; border-radius:4px; }
-.journal-action-buy, .journal-action-add { background:#e8f5e9; color:#2e7d32; }
-.journal-action-sell, .journal-action-reduce { background:#ffebee; color:#c62828; }
+.journal-action { font-size:0.72rem; padding:0.15rem 0.5rem; border-radius:4px; }
+.journal-action-open, .journal-action-add { background:#e8f5e9; color:#2e7d32; }
+.journal-action-reduce, .journal-action-close { background:#ffebee; color:#c62828; }
+.journal-action-retroactive { background:#fff3e0; color:#e65100; }
 .journal-price-row { display:flex; justify-content:space-between; font-size:0.85rem; margin-bottom:0.3rem; }
 .journal-pnl { font-weight:bold; }
 .journal-pnl.up { color:#e53935; }

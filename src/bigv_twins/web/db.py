@@ -343,6 +343,7 @@ class DecisionJournal(Base):
     action_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
     price_at_decision: Mapped[float | None] = mapped_column(Float, nullable=True)
     position_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    shares: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # User-written decision logic
     reasoning: Mapped[str] = mapped_column(Text, nullable=False)
     hold_conditions: Mapped[str | None] = mapped_column(Text, nullable=True)

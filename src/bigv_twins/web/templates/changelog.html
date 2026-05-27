@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}更新日志 · 赛博大V{% endblock %}
+
+{% block content %}
+<h2>📋 更新日志</h2>
+<p class="muted">赛博大V / 知乎归档 系统版本更新记录</p>
+
+<article class="changelog-entry">
+  <header>
+    <h3>v0.5 <small class="muted">2026-05-27</small></h3>
+  </header>
+  <h4>新功能</h4>
+  <ul>
+    <li><strong>投资决策日志</strong> — 记录买卖决策逻辑，系统自动补充市场快照，支持建仓/加仓/减仓/清仓/补录；实时显示持仓盈亏和仓位占比</li>
+    <li><strong>个股研究页</strong> — 输入股票代码即可看到：实时行情+PE/PB/市值、博主近30天提及、最新动态、回测记录</li>
+    <li><strong>大师检验模式</strong> — 让格雷厄姆/巴菲特/芒格/林奇从他们的投资框架出发，严格审视你的投资逻辑</li>
+    <li><strong>自选股基本面指标</strong> — 卡片显示 PE / PB / 总市值（零额外API调用，从已有行情数据解析）</li>
+    <li><strong>全局搜索</strong>（zhihu 归档站）— 博主归档搜索（17K+ 篇）+ 大师归档搜索（450+ 章节/演讲），FTS5 全文索引，中文友好</li>
+    <li><strong>《证券分析》上线</strong> — 格雷厄姆第6版，77章全文归档 + RAG 对话可用</li>
+    <li><strong>电子书下载</strong> — 大师归档每本书旁边加下载按钮（epub/mobi 原版）</li>
+  </ul>
+  <h4>改进</h4>
+  <ul>
+    <li>林奇章节标题修复 — 从「第1章」补全为「第1章 我是如何成长为一个选股者的」</li>
+    <li>博主搜索结果链接到本地归档（而非知乎原文，避免已删帖 404）</li>
+    <li>大师归档 FTS5 短查询 LIKE 兜底（2 字也能搜到）</li>
+    <li>数据库开启 WAL 模式，读写不互锁</li>
+  </ul>
+</article>
+
+<article class="changelog-entry">
+  <header>
+    <h3>v0.4 <small class="muted">2026-05-23 ~ 2026-05-25</small></h3>
+  </header>
+  <h4>新功能</h4>
+  <ul>
+    <li><strong>投资大师归档</strong> — 巴菲特/芒格/格雷厄姆/林奇，致股东信 + 股东大会 Q&A + 6本书章节级阅读</li>
+    <li><strong>大师 AI 分身</strong> — 基于 RAG 的大师对话，严格引用溯源</li>
+    <li><strong>自选股动态</strong> — 3 时段刷新（08:00/12:30/18:00），数据源：东财新闻+全市场公告+互动易+博主提及</li>
+    <li><strong>博主预测回测</strong> — 博主提到某股后14天 vs 沪深300 的超额收益排行榜</li>
+  </ul>
+</article>
+
+<article class="changelog-entry">
+  <header>
+    <h3>v0.3 <small class="muted">2026-05-20 ~ 2026-05-22</small></h3>
+  </header>
+  <h4>新功能</h4>
+  <ul>
+    <li><strong>多人对话</strong> — 一次问多位博主/大师，横向对比 + AI 汇总共识/分歧</li>
+    <li><strong>投资日报</strong> — 全球行情面板 + 金十事件 + 博主每日观点总结</li>
+    <li><strong>AI 投资顾问</strong> — 中立对照组，数据驱动的结构化分析</li>
+  </ul>
+</article>
+
+<article class="changelog-entry">
+  <header>
+    <h3>v0.1 ~ v0.2 <small class="muted">2026-05-18 ~ 2026-05-19</small></h3>
+  </header>
+  <ul>
+    <li>5 位知乎博主 RAG 对话上线（MR Dang / 鳄鱼 / 三人禾 / 沈同学 / 派大星）</li>
+    <li>每日自动爬虫 + embedding 更新</li>
+    <li>严格引用溯源 + persona 角色扮演</li>
+    <li>用户认证系统（邀请码注册）</li>
+  </ul>
+</article>
+
+<style>
+.changelog-entry { border:1px solid #e0e0e0; border-radius:8px; padding:1.2rem 1.5rem; margin-bottom:1.2rem; }
+.changelog-entry header { margin-bottom:0.8rem; }
+.changelog-entry h3 { margin:0; }
+.changelog-entry h4 { margin:1rem 0 0.5rem; font-size:0.9rem; color:#555; }
+.changelog-entry ul { margin:0; padding-left:1.2rem; }
+.changelog-entry li { margin-bottom:0.4rem; font-size:0.9rem; }
+</style>
+{% endblock %}
