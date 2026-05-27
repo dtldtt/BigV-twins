@@ -17,7 +17,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import select, text
+from sqlalchemy import or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bigv_twins.config import BY_SLUG
@@ -112,11 +112,14 @@ async def stock_page(
             "status": "complete" if bt.exit_price else "pending",
         })
 
-    # 5. User's journal entries for this ticker
+    # 5. User's journal entries for this ticker (match code OR name)
     journal_rows = await session.execute(
         select(DecisionJournal).where(
             DecisionJournal.user_id == user.id,
-            DecisionJournal.ticker == ticker,
+            or_(
+                DecisionJournal.ticker == ticker,
+                DecisionJournal.ticker_name == ticker,
+            ),
         ).order_by(DecisionJournal.created_at.desc()).limit(10)
     )
     journal_entries = list(journal_rows.scalars())
