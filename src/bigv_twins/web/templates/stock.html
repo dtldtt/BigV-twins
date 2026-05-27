@@ -80,6 +80,28 @@
 </section>
 {% endif %}
 
+<!-- Decision Journal -->
+{% if journal_entries %}
+<section class="stock-section">
+  <h3>📝 我的操作记录</h3>
+  {% for j in journal_entries %}
+  <div class="mention-item">
+    <div class="mention-head">
+      <span class="journal-action journal-action-{{ j.action }}">
+        {% if j.action == "open" %}建仓{% elif j.action == "add" %}加仓{% elif j.action == "reduce" %}减仓{% elif j.action == "close" %}清仓{% elif j.action == "retroactive" %}补录{% endif %}
+      </span>
+      <span>¥{{ "%.2f"|format(j.price_at_decision) if j.price_at_decision else "—" }}{% if j.shares %} · {{ j.shares }}股{% endif %}</span>
+      <small class="muted">{{ j.created_at.strftime("%Y-%m-%d") if j.created_at else "" }}</small>
+      <a href="/journal/{{ j.id }}" style="margin-left:auto; font-size:0.8rem">详情 →</a>
+    </div>
+    {% if j.action_detail %}<p class="mention-excerpt">计划：{{ j.action_detail[:100] }}</p>{% endif %}
+    {% if j.target_price %}<small class="muted">🎯 目标 ¥{{ "%.2f"|format(j.target_price) }}</small>{% endif %}
+    {% if j.stop_loss_price %}<small class="muted"> · ⛔ 止损 ¥{{ "%.2f"|format(j.stop_loss_price) }}</small>{% endif %}
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
 <!-- Backtest records -->
 {% if backtests %}
 <section class="stock-section">
@@ -138,6 +160,9 @@
 .backtest-table { width:100%; border-collapse:collapse; font-size:0.85rem; }
 .backtest-table th, .backtest-table td { padding:0.5rem; border-bottom:1px solid #eee; text-align:center; }
 .backtest-table th { background:#f8f9fa; }
+.journal-action { font-size:0.7rem; padding:0.1rem 0.4rem; border-radius:3px; }
+.journal-action-open, .journal-action-add, .journal-action-retroactive { background:#e8f5e9; color:#2e7d32; }
+.journal-action-reduce, .journal-action-close { background:#ffebee; color:#c62828; }
 td.up { color:#e53935; }
 td.down { color:#43a047; }
 </style>

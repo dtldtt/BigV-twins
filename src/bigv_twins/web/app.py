@@ -133,8 +133,11 @@ def create_app() -> FastAPI:
     app.include_router(stock_router)
 
     @app.get("/changelog", response_class=HTMLResponse)
-    async def changelog_page(request: Request):
-        return TEMPLATES.TemplateResponse(request=request, name="changelog.html", context={})
+    async def changelog_page(
+        request: Request,
+        user: Annotated[User | None, Depends(auth.current_user)],
+    ):
+        return TEMPLATES.TemplateResponse(request=request, name="changelog.html", context={"user": user})
 
     @app.get("/", response_class=HTMLResponse)
     async def home(

@@ -1,4 +1,4 @@
-"""投资决策日志 v2 — 重新设计：建仓/加仓/减仓/清仓/补录 + 持仓展示。"""
+"""投资决策日志 v3 — 完整持仓计算 + 自动加自选。"""
 
 from __future__ import annotations
 
@@ -93,56 +93,111 @@ async def _fill_snapshot(journal_id: int):
             log.warning("blogger opinions failed for %s: %s", journal.ticker, e)
         journal.next_review_at = (date.today() + timedelta(days=7)).strftime("%Y-%m-%d")
         await session.commit()
-        log.info("snapshot filled for journal #%d (%s)", journal_id, journal.ticker)
 
 
-def _build_portfolio(journals: list, price_map: dict, total_capital: float | None) -> list[dict]:
-    """Build portfolio view from active journals."""
-    # Group by ticker, compute net position
-    positions: dict[str, dict] = {}
+async def _auto_add_watchlist(user_id: int, ticker: str, ticker_name: str):
+    """If ticker not in user's watchlist, add it."""
+    async with db._SessionFactory() as session:
+        existing = await session.execute(
+            select(UserWatchlist).where(
+                UserWatchlist.user_id == user_id,
+                UserWatchlist.ticker == ticker,
+            )
+        )
+        if existing.scalar_one_or_none():
+            return
+        market = "A"
+        if len(ticker) == 5:
+            market = "HK"
+        wl = UserWatchlist(
+            user_id=user_id, ticker=ticker, name=ticker_name, market=market, note=""
+        )
+        session.add(wl)
+        try:
+            await session.commit()
+            log.info("auto-added %s to watchlist for user %d", ticker, user_id)
+        except Exception:
+            pass  # duplicate or other constraint
+
+
+def _build_portfolio(journals: list, price_map: dict, quote_map: dict,
+                     total_capital: float | None) -> list[dict]:
+    """Build portfolio from all journals. Calculates cost basis and avg buy price."""
+    # Group journals by ticker, ordered by time
+    from collections import defaultdict
+    ticker_ops: dict[str, list] = defaultdict(list)
+    ticker_name_map: dict[str, str] = {}
+
     for j in journals:
         if j.status != "active":
             continue
-        t = j.ticker
-        if t not in positions:
-            positions[t] = {
-                "ticker": t,
-                "name": j.ticker_name,
-                "shares": 0,
-                "cost_basis": None,
-                "latest_action": j.action,
-                "latest_date": j.created_at,
-            }
-        # For 补录, use the shares directly as the total position
-        if j.action == "retroactive":
-            positions[t]["shares"] = j.shares or 0
-            positions[t]["cost_basis"] = j.price_at_decision
-        elif j.action in ("open", "add"):
-            positions[t]["shares"] += (j.shares or 0)
-        elif j.action in ("reduce",):
-            positions[t]["shares"] -= (j.shares or 0)
-        elif j.action == "close":
-            positions[t]["shares"] = 0
-
-        if j.created_at and (positions[t]["latest_date"] is None or j.created_at > positions[t]["latest_date"]):
-            positions[t]["latest_action"] = j.action
-            positions[t]["latest_date"] = j.created_at
+        ticker_ops[j.ticker].append(j)
+        ticker_name_map[j.ticker] = j.ticker_name
 
     portfolio = []
-    for t, pos in positions.items():
-        if pos["shares"] <= 0:
+    for ticker, ops in ticker_ops.items():
+        ops.sort(key=lambda x: x.created_at or "")
+
+        total_shares = 0
+        total_cost = 0.0  # total money spent on buys (for cost basis)
+        total_buy_shares = 0  # only buy ops (for avg buy price)
+        total_buy_amount = 0.0  # only buy ops
+
+        for j in ops:
+            shares = j.shares or 0
+            price = j.price_at_decision or 0
+
+            if j.action in ("open", "add"):
+                total_shares += shares
+                total_cost += shares * price
+                total_buy_shares += shares
+                total_buy_amount += shares * price
+            elif j.action == "retroactive":
+                # Retroactive: set position directly
+                total_shares = shares
+                total_cost = shares * price
+                total_buy_shares = shares
+                total_buy_amount = shares * price
+            elif j.action == "reduce":
+                # Reduce: sell some shares at this price
+                if total_shares > 0 and shares > 0:
+                    # Cost basis per share before this sale
+                    cost_per_share = total_cost / total_shares if total_shares else 0
+                    sold_shares = min(shares, total_shares)
+                    total_shares -= sold_shares
+                    total_cost -= sold_shares * cost_per_share
+            elif j.action == "close":
+                # Full exit
+                total_shares = 0
+                total_cost = 0
+
+        if total_shares <= 0:
             continue
-        cur_price = price_map.get(t)
-        market_value = cur_price * pos["shares"] if cur_price else None
+
+        cost_basis = total_cost / total_shares if total_shares > 0 else 0
+        avg_buy_price = total_buy_amount / total_buy_shares if total_buy_shares > 0 else 0
+        cur_price = price_map.get(ticker)
+        daily_chg = quote_map.get(ticker, {}).get("change_pct")
+        market_value = cur_price * total_shares if cur_price else None
+        pnl = (cur_price - cost_basis) * total_shares if cur_price else None
+        pnl_pct = ((cur_price - cost_basis) / cost_basis * 100) if (cur_price and cost_basis) else None
         pct_of_total = (market_value / (total_capital * 10000) * 100) if (market_value and total_capital) else None
+
         portfolio.append({
-            **pos,
+            "ticker": ticker,
+            "name": ticker_name_map.get(ticker, ticker),
+            "shares": total_shares,
+            "cost_basis": cost_basis,
+            "avg_buy_price": avg_buy_price,
             "current_price": cur_price,
+            "daily_chg": daily_chg,
             "market_value": market_value,
+            "pnl": pnl,
+            "pnl_pct": pnl_pct,
             "pct_of_total": pct_of_total,
         })
 
-    portfolio.sort(key=lambda x: x.get("market_value") or 0, reverse=True)
+    portfolio.sort(key=lambda x: abs(x.get("market_value") or 0), reverse=True)
     return portfolio
 
 
@@ -154,15 +209,25 @@ async def journal_list(
 ):
     status_filter = request.query_params.get("status", "all")
     q = select(DecisionJournal).where(DecisionJournal.user_id == user.id)
-    if status_filter != "all":
-        q = q.where(DecisionJournal.status == status_filter)
+    if status_filter == "active":
+        q = q.where(DecisionJournal.status == "active")
+    elif status_filter == "closed":
+        q = q.where(DecisionJournal.status == "closed")
     q = q.order_by(DecisionJournal.created_at.desc())
     rows = await session.execute(q)
     journals = list(rows.scalars())
 
-    # Get all active tickers for portfolio + price display
-    all_tickers = list({j.ticker for j in journals})
+    # Also get ALL active journals for portfolio (even if filter is 'closed')
+    all_q = select(DecisionJournal).where(
+        DecisionJournal.user_id == user.id, DecisionJournal.status == "active"
+    )
+    all_rows = await session.execute(all_q)
+    all_active = list(all_rows.scalars())
+
+    # Fetch prices for all tickers
+    all_tickers = list({j.ticker for j in journals} | {j.ticker for j in all_active})
     price_map = {}
+    quote_map = {}
     if all_tickers:
         quotes = await asyncio.to_thread(
             get_watchlist_quotes, [_FakeW(t) for t in all_tickers]
@@ -170,10 +235,16 @@ async def journal_list(
         for qq in quotes:
             if qq.get("ok") and qq.get("current"):
                 price_map[qq["ticker"]] = qq["current"]
+                quote_map[qq["ticker"]] = qq
 
-    # Build portfolio from active journals
     total_capital = user.total_capital if hasattr(user, 'total_capital') and user.total_capital else None
-    portfolio = _build_portfolio(journals, price_map, total_capital)
+    portfolio = _build_portfolio(all_active, price_map, quote_map, total_capital)
+
+    # Total portfolio stats
+    total_market_value = sum(p["market_value"] or 0 for p in portfolio)
+    total_pnl = sum(p["pnl"] or 0 for p in portfolio)
+    total_cost = sum((p["cost_basis"] * p["shares"]) for p in portfolio if p["cost_basis"])
+    total_pnl_pct = (total_pnl / total_cost * 100) if total_cost > 0 else None
 
     return templates.TemplateResponse(
         request=request,
@@ -185,6 +256,9 @@ async def journal_list(
             "status_filter": status_filter,
             "portfolio": portfolio,
             "total_capital": total_capital,
+            "total_market_value": total_market_value,
+            "total_pnl": total_pnl,
+            "total_pnl_pct": total_pnl_pct,
         },
     )
 
@@ -256,6 +330,8 @@ async def journal_create(
     journal_id = journal.id
     await session.commit()
     background_tasks.add_task(_fill_snapshot, journal_id)
+    # Auto-add to watchlist
+    background_tasks.add_task(_auto_add_watchlist, user.id, ticker.strip(), ticker_name.strip())
     return RedirectResponse(f"/journal/{journal_id}", status_code=303)
 
 

@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bigv_twins.config import BY_SLUG
 
 from . import auth, db
-from .db import BacktestEntry, BloggerDailyBrief, TickerDailyBrief, User
+from .db import BacktestEntry, BloggerDailyBrief, DecisionJournal, TickerDailyBrief, User
 from .daily_brief import get_watchlist_quotes
 
 log = logging.getLogger("bigv_twins.web.stock")
@@ -110,6 +110,15 @@ async def stock_page(
             "excess_return": bt.excess_return,
             "status": "complete" if bt.exit_price else "pending",
         })
+
+    # 5. User's journal entries for this ticker
+    journal_rows = await session.execute(
+        select(DecisionJournal).where(
+            DecisionJournal.user_id == user.id,
+            DecisionJournal.ticker == ticker,
+        ).order_by(DecisionJournal.created_at.desc()).limit(10)
+    )
+    journal_entries = list(journal_rows.scalars())
 
     # Stock name: prefer from quote, fallback to ticker
     stock_name = quote.get("name") or ticker
