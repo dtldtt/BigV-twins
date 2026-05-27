@@ -17,9 +17,14 @@
 
 <div class="chat-layout">
   <aside class="chat-sidebar">
-    <form method="post" action="/chat/{{ blogger.slug }}/new" style="margin-bottom:0.8rem">
+    <form method="post" action="/chat/{{ blogger.slug }}/new" style="margin-bottom:0.4rem">
       <button type="submit" style="width:100%">+ 新对话</button>
     </form>
+    {% if blogger.is_master %}
+    <form method="post" action="/chat/{{ blogger.slug }}/new?mode=challenge" style="margin-bottom:0.8rem">
+      <button type="submit" class="secondary outline" style="width:100%; font-size:0.8rem">🎯 让大师检验我的想法</button>
+    </form>
+    {% endif %}
     <small class="muted">与 {{ blogger.name }} 的历史</small>
     <ul>
       {% for c in convos %}
@@ -57,9 +62,17 @@
           <div class="chat-bubble assistant" data-raw="{{ m.content }}">{{ m.content }}</div>
         {% endif %}
       {% endfor %}
+      {% if current_conv and current_conv.mode == "challenge" %}
+        <div style="background:#fff3cd; border:1px solid #ffc107; border-radius:8px; padding:0.8rem 1rem; margin-bottom:1rem; font-size:0.85rem">
+          <strong>🎯 检验模式</strong> · {{ blogger.name }}将从他的投资框架出发，严格审视你的投资逻辑。<br>
+          <span class="muted">试试写下：「我准备买入XXX，理由是……」或「我认为未来一年XX行业会……因为……」</span>
+        </div>
+      {% endif %}
       {% if not messages %}
         <p class="muted" id="empty-hint">
-          {% if current_conv %}
+          {% if current_conv and current_conv.mode == "challenge" %}
+            写下你的投资想法，{{ blogger.name }}会帮你找出逻辑中的薄弱环节。
+          {% elif current_conv %}
             还没消息，问点什么吧。比如「最近怎么看 A 股？」
           {% else %}
             还没有对话。点上方「+ 新对话」开始。
@@ -70,7 +83,7 @@
 
     {% if current_conv %}
       <form id="ask-form" class="chat-input" data-cid="{{ current_conv.id }}">
-        <textarea id="msg-input" rows="4" placeholder="问点什么… (Cmd/Ctrl+Enter 发送)" required></textarea>
+        <textarea id="msg-input" rows="4" placeholder="{% if current_conv and current_conv.mode == 'challenge' %}写下你的投资逻辑：我打算买入/卖出某只股票，因为… 或者：我对某个行业/趋势的判断是…{% else %}问点什么… (Cmd/Ctrl+Enter 发送){% endif %}" required></textarea>
         <button type="submit" id="send-btn">发送</button>
       </form>
     {% endif %}

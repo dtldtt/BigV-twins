@@ -45,13 +45,18 @@ def _parse_index_tilde(symbol: str, payload: str) -> dict | None:
     """Standard Tencent qt format: tilde-separated, 50+ fields."""
     try:
         fields = payload.split("~")
+        def _f(idx):
+            return float(fields[idx]) if len(fields) > idx and fields[idx] not in ("", "-") else None
         return {
             "symbol": symbol,
             "name": fields[1] or symbol,
-            "current": float(fields[3]) if fields[3] not in ("", "-") else None,
-            "prev_close": float(fields[4]) if fields[4] not in ("", "-") else None,
-            "change_amt": float(fields[31]) if len(fields) > 31 and fields[31] not in ("", "-") else None,
-            "change_pct": float(fields[32]) if len(fields) > 32 and fields[32] not in ("", "-") else None,
+            "current": _f(3),
+            "prev_close": _f(4),
+            "change_amt": _f(31),
+            "change_pct": _f(32),
+            "pe": _f(39),
+            "pb": _f(46),
+            "market_cap": _f(45),
         }
     except (ValueError, IndexError) as e:
         log.warning("parse_index_tilde failed for %s: %s", symbol, e)
@@ -221,6 +226,9 @@ def get_watchlist_quotes(watchlist_items: Iterable) -> list[dict]:
                 "current": cached["current"],
                 "change_pct": cached["change_pct"],
                 "change_amt": cached["change_amt"],
+                "pe": cached.get("pe"),
+                "pb": cached.get("pb"),
+                "market_cap": cached.get("market_cap"),
                 "ok": True,
             })
         else:

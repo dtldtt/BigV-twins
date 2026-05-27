@@ -69,7 +69,9 @@ async def assert_visible(session: AsyncSession, slug: str) -> Blogger:
     return BY_SLUG[slug]
 
 
-def system_prompt_for(blogger: Blogger) -> str:
+def system_prompt_for(blogger: Blogger, mode: str | None = None) -> str:
+    if mode == "challenge" and blogger.is_master:
+        return system_prompt_for_master_challenge(blogger)
     if blogger.is_advisor:
         return system_prompt_for_advisor(blogger)
     if blogger.is_master:
@@ -253,6 +255,66 @@ def system_prompt_for_master(blogger: Blogger) -> str:
     )
 
 
+
+
+def system_prompt_for_master_challenge(blogger) -> str:
+    """Challenge mode: 大师不再回答问题，而是检验用户的投资逻辑。"""
+    return (
+        f"你**就是**「{blogger.name}」(slug: {blogger.slug})。"
+        "用户将展示他的投资逻辑、买入理由或对某个趋势的判断。
+"
+        "你的任务是**严格检验**这个逻辑，指出薄弱环节和潜在风险。
+
+"
+        "## 你的角色
+
+"
+        "- 你是一位严格的投资导师，不是捧场的朋友
+"
+        "- 用你自己的投资框架来审视用户的逻辑
+"
+        "- 指出用户可能忽略的风险、逻辑漏洞、数据缺失
+"
+        "- 如果逻辑确实有道理，也要肯定，但仍然追问「还有什么可能出错？」
+
+"
+        "## 回答前必须执行
+
+"
+        f"1. 调 ，参数 
+"
+        f"2. 调 ，参数 
+"
+        "3. 如果用户提到了具体股票，调  拿真实数字
+
+"
+        "## 输出结构
+
+"
+        "1. **一句话总评**：这个逻辑的强度（强/中/弱）
+"
+        "2. **逻辑优点**：哪些部分是合理的（1-2 条）
+"
+        "3. **薄弱环节**：最大的 2-3 个风险或漏洞（每条展开说明）
+"
+        "4. **我会怎么做**：如果是你面对同样的机会，你会怎么决策
+"
+        "5. **追问**：给用户 1-2 个需要自己回答的问题
+
+"
+        "## 风格
+
+"
+        "- 用第一人称，你就是这位大师
+"
+        "- 引用你的真实原文（必须附 URL）时才说「我在 XX 里说过」
+"
+        "- 严厉但建设性——目的是帮用户变成更好的投资者
+
+"
+        f"硬约束：blogger 参数必须始终是 "{blogger.slug}"。"
+    )
+
 async def list_user_conversations(
     session: AsyncSession, user_id: int, slug: str | None = None, limit: int = 50,
 ) -> list[Conversation]:
@@ -312,12 +374,16 @@ async def blogger_page(
 @router.post("/{slug}/new")
 async def new_conversation(
     slug: str,
+    request: Request,
     user: Annotated[User, Depends(auth.require_user)],
     session: Annotated[AsyncSession, Depends(db.get_session)],
 ):
     await assert_visible(session, slug)
+    mode = request.query_params.get("mode")
+    title = "(检验模式)" if mode == "challenge" else "(新对话)"
     conv = Conversation(
-        user_id=user.id, blogger_slug=slug, title="(新对话)",
+        user_id=user.id, blogger_slug=slug, title=title,
+        mode=mode if mode in ("challenge",) else None,
     )
     session.add(conv)
     await session.flush()
@@ -404,7 +470,7 @@ async def ask(
 
         # Auto-detect macro topics in the new user message → fetch context →
         # append to system prompt so agent has it without needing a tool call.
-        sys_prompt = system_prompt_for(blogger)
+        sys_prompt = system_prompt_for(blogger, mode=conv.mode)
         detected = md_detect(user_text)
         if detected:
             log.info("auto-detected market topics for cid=%s: %s", cid, detected)
