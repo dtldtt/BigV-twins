@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}投资决策日志 · 赛博大V{% endblock %}
+
+{% block content %}
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1.5rem">
+  <h2 style="margin:0">📝 投资决策日志</h2>
+  <a href="/journal/new" role="button">+ 新建决策记录</a>
+</div>
+
+<div style="margin-bottom:1rem">
+  <a href="/journal?status=active" class="{% if status_filter == 'active' %}contrast{% endif %}" style="margin-right:0.8rem">持仓中</a>
+  <a href="/journal?status=closed" class="{% if status_filter == 'closed' %}contrast{% endif %}" style="margin-right:0.8rem">已平仓</a>
+  <a href="/journal?status=all" class="{% if status_filter == 'all' %}contrast{% endif %}">全部</a>
+</div>
+
+{% if journals %}
+<div class="journal-grid">
+  {% for j in journals %}
+  <a href="/journal/{{ j.id }}" class="journal-card {{ 'journal-closed' if j.status == 'closed' else '' }}">
+    <div class="journal-card-head">
+      <strong>{{ j.ticker_name }}</strong>
+      <code>{{ j.ticker }}</code>
+      <span class="journal-action journal-action-{{ j.action }}">
+        {% if j.action == 'buy' %}买入{% elif j.action == 'sell' %}卖出{% elif j.action == 'add' %}加仓{% elif j.action == 'reduce' %}减仓{% else %}{{ j.action }}{% endif %}
+      </span>
+    </div>
+    <div class="journal-card-body">
+      <div class="journal-price-row">
+        <span>决策价: ¥{{ "%.2f"|format(j.price_at_decision) if j.price_at_decision else "—" }}</span>
+        {% if j.status == 'active' and price_map.get(j.ticker) %}
+          {% set cur = price_map[j.ticker] %}
+          {% set pnl = ((cur - j.price_at_decision) / j.price_at_decision * 100) if j.price_at_decision else 0 %}
+          <span class="journal-pnl {% if pnl > 0 %}up{% elif pnl < 0 %}down{% endif %}">
+            现价 ¥{{ "%.2f"|format(cur) }} ({{ "%+.1f%%"|format(pnl) }})
+          </span>
+        {% elif j.status == 'closed' and j.closed_price %}
+          {% set pnl = ((j.closed_price - j.price_at_decision) / j.price_at_decision * 100) if j.price_at_decision else 0 %}
+          <span class="journal-pnl {% if pnl > 0 %}up{% elif pnl < 0 %}down{% endif %}">
+            平仓 ¥{{ "%.2f"|format(j.closed_price) }} ({{ "%+.1f%%"|format(pnl) }})
+          </span>
+        {% endif %}
+      </div>
+      <p class="journal-reasoning">{{ j.reasoning[:100] }}{% if j.reasoning|length > 100 %}…{% endif %}</p>
+      <small class="muted">{{ j.created_at.strftime("%Y-%m-%d") if j.created_at else "" }}</small>
+    </div>
+  </a>
+  {% endfor %}
+</div>
+{% else %}
+<div style="text-align:center; padding:3rem; color:#888">
+  <p>还没有决策记录。</p>
+  <p>下次做买卖决策时，花 2 分钟记录下来——三个月后你会感谢自己的。</p>
+  <a href="/journal/new" role="button">创建第一条记录</a>
+</div>
+{% endif %}
+
+<style>
+.journal-grid { display:flex; flex-direction:column; gap:0.8rem; }
+.journal-card { display:block; padding:1rem; border:1px solid #e0e0e0; border-radius:8px; text-decoration:none; color:inherit; transition:box-shadow 0.15s; }
+.journal-card:hover { box-shadow:0 2px 8px rgba(0,0,0,0.08); }
+.journal-closed { opacity:0.7; border-style:dashed; }
+.journal-card-head { display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem; }
+.journal-action { font-size:0.75rem; padding:0.15rem 0.5rem; border-radius:4px; }
+.journal-action-buy, .journal-action-add { background:#e8f5e9; color:#2e7d32; }
+.journal-action-sell, .journal-action-reduce { background:#ffebee; color:#c62828; }
+.journal-price-row { display:flex; justify-content:space-between; font-size:0.85rem; margin-bottom:0.3rem; }
+.journal-pnl { font-weight:bold; }
+.journal-pnl.up { color:#e53935; }
+.journal-pnl.down { color:#43a047; }
+.journal-reasoning { font-size:0.85rem; color:#555; margin:0.3rem 0; }
+</style>
+{% endblock %}

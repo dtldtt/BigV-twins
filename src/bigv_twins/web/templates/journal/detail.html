@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}{{ j.ticker_name }} · 决策日志{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ul>
+    <li><a href="/journal">← 决策日志</a></li>
+    <li>{{ j.ticker_name }} ({{ j.ticker }})</li>
+  </ul>
+</nav>
+
+<!-- Header -->
+<div class="detail-header">
+  <div>
+    <h2 style="margin:0">{{ j.ticker_name }} <code>{{ j.ticker }}</code></h2>
+    <span class="journal-action journal-action-{{ j.action }}">
+      {% if j.action == 'buy' %}买入{% elif j.action == 'sell' %}卖出{% elif j.action == 'add' %}加仓{% elif j.action == 'reduce' %}减仓{% else %}{{ j.action }}{% endif %}
+    </span>
+    <small class="muted">{{ j.created_at.strftime("%Y-%m-%d %H:%M") if j.created_at else "" }}</small>
+    {% if j.status == 'closed' %}<span class="badge-closed">已平仓</span>{% endif %}
+  </div>
+  <div class="detail-pnl">
+    {% if j.status == 'active' and current_price and j.price_at_decision %}
+      <div class="pnl-current">现价 ¥{{ "%.2f"|format(current_price) }}</div>
+      <div class="pnl-value {% if pnl_pct > 0 %}up{% elif pnl_pct < 0 %}down{% endif %}">
+        {{ "%+.1f%%"|format(pnl_pct) }}
+      </div>
+    {% elif j.status == 'closed' and j.closed_price and j.price_at_decision %}
+      {% set pnl = ((j.closed_price - j.price_at_decision) / j.price_at_decision * 100) %}
+      <div class="pnl-current">平仓价 ¥{{ "%.2f"|format(j.closed_price) }}</div>
+      <div class="pnl-value {% if pnl > 0 %}up{% elif pnl < 0 %}down{% endif %}">{{ "%+.1f%%"|format(pnl) }}</div>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Decision Logic -->
+<section class="detail-section">
+  <h3>💡 我的决策逻辑</h3>
+  <div class="logic-box">
+    <div class="logic-row">
+      <span class="logic-label">决策价</span>
+      <span>¥{{ "%.2f"|format(j.price_at_decision) if j.price_at_decision else "—" }}{% if j.position_pct %} · 仓位 {{ j.position_pct }}%{% endif %}</span>
+    </div>
+    <div class="logic-main">{{ j.reasoning }}</div>
+    {% if j.hold_conditions %}
+    <div class="logic-row"><span class="logic-label">持有条件</span><span>{{ j.hold_conditions }}</span></div>
+    {% endif %}
+    {% if j.exit_signals %}
+    <div class="logic-row"><span class="logic-label">退出信号</span><span>{{ j.exit_signals }}</span></div>
+    {% endif %}
+    {% if j.target_price or j.stop_loss_price %}
+    <div class="logic-row">
+      {% if j.target_price %}<span>🎯 目标价 ¥{{ "%.2f"|format(j.target_price) }}</span>{% endif %}
+      {% if j.stop_loss_price %}<span>⛔ 止损价 ¥{{ "%.2f"|format(j.stop_loss_price) }}</span>{% endif %}
+    </div>
+    {% endif %}
+    {% if j.expected_hold_period %}
+    <div class="logic-row"><span class="logic-label">预期持有</span><span>{{ j.expected_hold_period }}</span></div>
+    {% endif %}
+    {% if j.if_drop_10pct %}
+    <div class="logic-row"><span class="logic-label">跌10%预案</span><span>{{ j.if_drop_10pct }}</span></div>
+    {% endif %}
+  </div>
+</section>
+
+<!-- Auto-collected snapshot -->
+{% if snapshot %}
+<section class="detail-section">
+  <h3>📊 决策时环境快照</h3>
+  <div class="snapshot-grid">
+    {% if snapshot.pe %}<div><small>PE</small><strong>{{ "%.1f"|format(snapshot.pe) }}</strong></div>{% endif %}
+    {% if snapshot.pb %}<div><small>PB</small><strong>{{ "%.2f"|format(snapshot.pb) }}</strong></div>{% endif %}
+    {% if snapshot.market_cap %}<div><small>市值</small><strong>{{ "%.0f"|format(snapshot.market_cap) }}亿</strong></div>{% endif %}
+    {% if snapshot.price %}<div><small>价格</small><strong>¥{{ "%.2f"|format(snapshot.price) }}</strong></div>{% endif %}
+  </div>
+</section>
+{% endif %}
+
+<!-- Blogger opinions -->
+{% if opinions %}
+<section class="detail-section">
+  <h3>📢 决策时博主观点</h3>
+  {% for op in opinions %}
+  <div class="opinion-item">
+    <strong>{{ op.name }}</strong> <small class="muted">{{ op.date }}</small>
+    <p>{{ op.excerpt }}{% if op.excerpt|length >= 150 %}…{% endif %}</p>
+  </div>
+  {% endfor %}
+</section>
+{% endif %}
+
+<!-- Close position -->
+{% if j.status == 'active' %}
+<section class="detail-section">
+  <h3>🔒 标记平仓</h3>
+  <form method="post" action="/journal/{{ j.id }}/close" class="close-form">
+    <div class="form-row">
+      <label>平仓价格 <input type="number" name="closed_price" step="0.01" required></label>
+      <label>原因 <input type="text" name="closed_reason" placeholder="如「达到目标价」"></label>
+    </div>
+    <button type="submit" class="secondary">确认平仓</button>
+  </form>
+</section>
+{% elif j.closed_reason %}
+<section class="detail-section">
+  <h3>📋 平仓记录</h3>
+  <p>平仓时间：{{ j.closed_at.strftime("%Y-%m-%d") if j.closed_at else "—" }}</p>
+  <p>原因：{{ j.closed_reason }}</p>
+</section>
+{% endif %}
+
+<!-- Link to stock page -->
+<div style="margin-top:2rem; text-align:center">
+  <a href="/stock/{{ j.ticker }}">📊 查看 {{ j.ticker_name }} 研究页</a>
+</div>
+
+<style>
+.detail-header { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1.5rem; }
+.detail-pnl { text-align:right; }
+.pnl-current { font-size:0.85rem; color:#888; }
+.pnl-value { font-size:1.5rem; font-weight:bold; }
+.pnl-value.up { color:#e53935; }
+.pnl-value.down { color:#43a047; }
+.badge-closed { font-size:0.75rem; background:#eee; padding:0.2rem 0.5rem; border-radius:4px; margin-left:0.5rem; }
+.detail-section { margin-bottom:2rem; }
+.detail-section h3 { border-bottom:2px solid #f0f0f0; padding-bottom:0.5rem; }
+.logic-box { background:#f8f9fa; border-radius:8px; padding:1rem; }
+.logic-row { display:flex; gap:1rem; margin-bottom:0.5rem; font-size:0.9rem; }
+.logic-label { color:#888; min-width:5rem; }
+.logic-main { padding:0.5rem 0; white-space:pre-wrap; line-height:1.6; }
+.snapshot-grid { display:flex; gap:2rem; }
+.snapshot-grid div { text-align:center; }
+.snapshot-grid small { display:block; color:#888; font-size:0.75rem; }
+.snapshot-grid strong { font-size:1.1rem; }
+.opinion-item { padding:0.5rem 0; border-bottom:1px solid #eee; }
+.opinion-item p { font-size:0.85rem; color:#555; margin:0.3rem 0 0; }
+.close-form .form-row { display:grid; grid-template-columns:1fr 2fr; gap:1rem; margin-bottom:0.8rem; }
+.journal-action { font-size:0.75rem; padding:0.15rem 0.5rem; border-radius:4px; }
+.journal-action-buy, .journal-action-add { background:#e8f5e9; color:#2e7d32; }
+.journal-action-sell, .journal-action-reduce { background:#ffebee; color:#c62828; }
+</style>
+{% endblock %}

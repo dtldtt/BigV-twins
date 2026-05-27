@@ -30,6 +30,7 @@ from .blogger_brief import generate_briefs_for_day
 from .news_scraper import refresh_jin10_news
 from .report import router as report_router
 from .search import rebuild_search_index, router as search_router
+from .journal import router as journal_router
 from .stock import router as stock_router
 from .ticker_brief import generate_ticker_briefs_for_day
 
@@ -128,7 +129,8 @@ def create_app() -> FastAPI:
     app.include_router(search_router)
     app.include_router(admin_router)
     app.include_router(about_router)
-app.include_router(stock_router)
+    app.include_router(journal_router)
+    app.include_router(stock_router)
 
     @app.get("/", response_class=HTMLResponse)
     async def home(

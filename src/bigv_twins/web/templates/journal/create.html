@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% block title %}新建决策记录 · 赛博大V{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ul>
+    <li><a href="/journal">← 决策日志</a></li>
+    <li>新建记录</li>
+  </ul>
+</nav>
+
+<h2>📝 记录投资决策</h2>
+<p class="muted" style="margin-top:-0.5rem; margin-bottom:1.5rem">
+  花 2 分钟记录你的决策逻辑。系统会自动补充市场环境快照——三个月后回来复盘。
+</p>
+
+<form method="post" action="/journal/new" class="journal-form">
+  <!-- Section 1: 标的 + 操作 -->
+  <fieldset>
+    <legend>标的与操作</legend>
+    <div class="form-row">
+      <label>
+        股票代码 *
+        <input type="text" name="ticker" value="{{ prefill_ticker }}" required placeholder="如 601088" maxlength="10">
+      </label>
+      <label>
+        股票名称 *
+        <input type="text" name="ticker_name" value="{{ prefill_name }}" required placeholder="如 中国神华">
+      </label>
+    </div>
+    <div class="form-row">
+      <label>
+        操作类型 *
+        <select name="action" required>
+          <option value="buy">买入</option>
+          <option value="add">加仓</option>
+          <option value="reduce">减仓</option>
+          <option value="sell">卖出</option>
+        </select>
+      </label>
+      <label>
+        决策时价格
+        <input type="number" name="price_at_decision" step="0.01" placeholder="当前股价">
+      </label>
+      <label>
+        仓位占比 (%)
+        <input type="number" name="position_pct" step="0.1" min="0" max="100" placeholder="如 15">
+      </label>
+    </div>
+    <label>
+      操作细节（可选）
+      <input type="text" name="action_detail" placeholder="如「加仓到目标仓位 15%」">
+    </label>
+  </fieldset>
+
+  <!-- Section 2: 决策逻辑 -->
+  <fieldset>
+    <legend>决策逻辑</legend>
+    <label>
+      核心理由 * <small class="muted">（为什么做这个决策？）</small>
+      <textarea name="reasoning" rows="4" required placeholder="例如：煤价底部企稳，当前 PE 仅 9 倍处于历史 20% 分位，股息率 5.8% 提供安全垫。煤化工转型带来额外增长点。"></textarea>
+    </label>
+    <label>
+      持有条件 <small class="muted">（什么情况下继续持有）</small>
+      <textarea name="hold_conditions" rows="2" placeholder="例如：PE < 15 且分红率保持 > 60%"></textarea>
+    </label>
+    <label>
+      退出信号 <small class="muted">（什么情况下卖出）</small>
+      <textarea name="exit_signals" rows="2" placeholder="例如：股息率 < 4% 或管理层重大变动或煤价跌破 800"></textarea>
+    </label>
+  </fieldset>
+
+  <!-- Section 3: 预设 -->
+  <fieldset>
+    <legend>预设方案</legend>
+    <div class="form-row">
+      <label>
+        目标价
+        <input type="number" name="target_price" step="0.01" placeholder="达到后考虑卖出">
+      </label>
+      <label>
+        止损价
+        <input type="number" name="stop_loss_price" step="0.01" placeholder="跌到这里止损">
+      </label>
+    </div>
+    <div class="form-row">
+      <label>
+        预期持有时间
+        <select name="expected_hold_period">
+          <option value="">-- 选择 --</option>
+          <option value="1month">1 个月</option>
+          <option value="3months">3 个月</option>
+          <option value="6months">6 个月</option>
+          <option value="1year">1 年</option>
+          <option value="3years">3 年以上</option>
+        </select>
+      </label>
+      <label>
+        如果跌 10% 我会
+        <select name="if_drop_10pct">
+          <option value="">-- 选择 --</option>
+          <option value="add">加仓</option>
+          <option value="hold">持有不动</option>
+          <option value="stop">止损</option>
+          <option value="review">重新评估</option>
+        </select>
+      </label>
+    </div>
+  </fieldset>
+
+  <button type="submit" style="width:100%">保存决策记录</button>
+  <small class="muted" style="display:block; text-align:center; margin-top:0.5rem">
+    保存后系统将在后台自动补充市场环境快照（PE/PB/大盘/博主观点）
+  </small>
+</form>
+
+<style>
+.journal-form fieldset { margin-bottom:1.5rem; }
+.journal-form legend { font-weight:bold; font-size:1rem; }
+.form-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:1rem; }
+.journal-form textarea { font-size:0.9rem; }
+</style>
+{% endblock %}

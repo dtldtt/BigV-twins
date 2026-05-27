@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from typing import AsyncIterator
 
 from sqlalchemy import (
-    Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint, select,
+    Boolean, DateTime, Float, ForeignKey, Integer, String, Text, UniqueConstraint, select,
 )
 from sqlalchemy.ext.asyncio import (
     AsyncAttrs, AsyncSession, async_sessionmaker, create_async_engine,
@@ -326,6 +326,47 @@ _engine = create_async_engine(
 
 _SessionFactory = async_sessionmaker(_engine, expire_on_commit=False, class_=AsyncSession)
 
+
+
+
+class DecisionJournal(Base):
+    """投资决策日志 — 记录用户的买入/卖出决策 + 环境快照。"""
+    __tablename__ = "decision_journal"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    ticker: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    ticker_name: Mapped[str] = mapped_column(String(60), nullable=False)
+    action: Mapped[str] = mapped_column(String(20), nullable=False)  # buy/sell/add/reduce
+    action_detail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    price_at_decision: Mapped[float | None] = mapped_column(Float, nullable=True)
+    position_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # User-written decision logic
+    reasoning: Mapped[str] = mapped_column(Text, nullable=False)
+    hold_conditions: Mapped[str | None] = mapped_column(Text, nullable=True)
+    exit_signals: Mapped[str | None] = mapped_column(Text, nullable=True)
+    target_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    stop_loss_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    expected_hold_period: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    if_drop_10pct: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Auto-collected snapshots (JSON)
+    stock_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
+    market_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
+    blogger_opinions: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Status
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, onupdate=_now)
+    closed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    closed_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    closed_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # Review scheduling
+    next_review_at: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    review_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+
+    user: Mapped[User] = relationship()
 
 async def init_db() -> None:
     """Create tables if missing. Idempotent; called at app startup.
