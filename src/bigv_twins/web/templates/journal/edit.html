@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}编辑记录 · {{ j.ticker_name }}{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ul>
+    <li><a href="/journal">← 投资记录</a></li>
+    <li><a href="/journal/{{ j.id }}">{{ j.ticker_name }}</a></li>
+    <li>编辑</li>
+  </ul>
+</nav>
+
+<h2>✏️ 编辑交易记录</h2>
+
+<form method="post" action="/journal/{{ j.id }}/edit" class="journal-form">
+  <fieldset>
+    <legend>标的与操作</legend>
+    <div class="form-row">
+      <label>
+        股票代码
+        <input type="text" value="{{ j.ticker }}" disabled style="opacity:0.6">
+      </label>
+      <label>
+        股票名称
+        <input type="text" name="ticker_name" value="{{ j.ticker_name }}" required>
+      </label>
+    </div>
+    <div class="form-row">
+      <label>
+        操作类型
+        <select name="action" required>
+          <option value="open" {% if j.action == 'open' %}selected{% endif %}>建仓</option>
+          <option value="add" {% if j.action == 'add' %}selected{% endif %}>加仓</option>
+          <option value="reduce" {% if j.action == 'reduce' %}selected{% endif %}>减仓</option>
+          <option value="close" {% if j.action == 'close' %}selected{% endif %}>清仓</option>
+          <option value="retroactive" {% if j.action == 'retroactive' %}selected{% endif %}>补录</option>
+        </select>
+      </label>
+      <label>
+        价格
+        <input type="number" name="price_at_decision" step="0.001" value="{{ j.price_at_decision or '' }}">
+      </label>
+      <label>
+        数量（股）
+        <input type="number" name="shares" step="1" value="{{ j.shares or '' }}">
+      </label>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>决策逻辑</legend>
+    <label>
+      核心理由
+      <textarea name="reasoning" rows="4" required>{{ j.reasoning or '' }}</textarea>
+    </label>
+    <label>
+      操作计划
+      <textarea name="action_plan" rows="3">{{ j.action_detail or '' }}</textarea>
+    </label>
+  </fieldset>
+
+  <fieldset>
+    <legend>目标与预设</legend>
+    <div class="form-row">
+      <label>
+        目标价
+        <input type="number" name="target_price" step="0.01" value="{{ j.target_price or '' }}">
+      </label>
+      <label>
+        止损价
+        <input type="number" name="stop_loss_price" step="0.01" value="{{ j.stop_loss_price or '' }}">
+      </label>
+    </div>
+    <div class="form-row">
+      <label>
+        预期持有
+        <select name="expected_hold_period">
+          <option value="">--</option>
+          {% for v, l in [('1month','1个月'),('3months','3个月'),('6months','6个月'),('1year','1年'),('3years','3年+')] %}
+          <option value="{{ v }}" {% if j.expected_hold_period == v %}selected{% endif %}>{{ l }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        跌10%
+        <select name="if_drop_10pct">
+          <option value="">--</option>
+          {% for v, l in [('add','加仓'),('hold','持有'),('stop','止损'),('review','重新评估')] %}
+          <option value="{{ v }}" {% if j.if_drop_10pct == v %}selected{% endif %}>{{ l }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+  </fieldset>
+
+  <button type="submit" style="width:100%">保存修改</button>
+</form>
+
+<style>
+.journal-form fieldset { margin-bottom:1.5rem; }
+.journal-form legend { font-weight:bold; font-size:1rem; }
+.form-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:1rem; }
+</style>
+{% endblock %}

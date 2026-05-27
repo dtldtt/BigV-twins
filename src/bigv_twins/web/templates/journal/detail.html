@@ -84,6 +84,29 @@
 </section>
 {% endif %}
 
+<!-- Master wisdom -->
+{% if j.market_snapshot %}
+  {% set ms = j.market_snapshot %}
+  {% if ms is string %}
+    {% set ms_data = ms | fromjson %}
+  {% else %}
+    {% set ms_data = ms %}
+  {% endif %}
+  {% if ms_data.get("__master_wisdom") if ms_data is mapping else false %}
+  <section class="detail-section">
+    <h3>📚 大师相关智慧</h3>
+    {% for w in ms_data["__master_wisdom"] %}
+    <div style="padding:0.5rem 0; border-bottom:1px solid #eee; font-size:0.85rem">
+      <strong>{{ w.master }}</strong>
+      <small class="muted">· {{ w.title }}</small>
+      <p style="color:#555; margin:0.2rem 0">{{ w.excerpt }}…</p>
+      {% if w.url %}<a href="{{ w.url }}" style="font-size:0.8rem">原文 →</a>{% endif %}
+    </div>
+    {% endfor %}
+  </section>
+  {% endif %}
+{% endif %}
+
 <!-- Blogger opinions -->
 {% if opinions %}
 <section class="detail-section">

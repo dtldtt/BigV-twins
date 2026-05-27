@@ -101,6 +101,32 @@ async def _fill_snapshot(journal_id: int):
             journal.market_snapshot = json.dumps(market_data, ensure_ascii=False)
         except Exception as e:
             log.warning("market snapshot failed: %s", e)
+        # Master wisdom: search master RAG DBs for related insights
+        try:
+            from bigv_twins.search import search as rag_search
+            wisdom = []
+            for master_slug in ("buffett", "munger", "graham", "lynch"):
+                try:
+                    hits = rag_search(master_slug, journal.ticker_name, top_k=2)
+                    for h in hits:
+                        if h.distance < 1.0:
+                            wisdom.append({
+                                "master": master_slug,
+                                "title": h.column_title,
+                                "excerpt": h.text[:150],
+                                "url": h.url,
+                            })
+                except Exception:
+                    pass
+            if wisdom:
+                journal.market_snapshot = json.dumps(
+                    {**(json.loads(journal.market_snapshot) if journal.market_snapshot else {}),
+                     "__master_wisdom": wisdom[:4]},
+                    ensure_ascii=False,
+                )
+        except Exception as e:
+            log.warning("master wisdom search failed: %s", e)
+
         journal.next_review_at = (date.today() + timedelta(days=7)).strftime("%Y-%m-%d")
         await session.commit()
 
@@ -431,6 +457,57 @@ async def journal_detail(
         },
     )
 
+
+
+
+@router.get("/{jid}/edit", response_class=HTMLResponse)
+async def journal_edit_form(
+    request: Request,
+    jid: int,
+    user: Annotated[User, Depends(auth.require_user)],
+    session: Annotated[AsyncSession, Depends(db.get_session)],
+):
+    journal = await session.get(DecisionJournal, jid)
+    if not journal or journal.user_id != user.id:
+        raise HTTPException(status_code=404)
+    return templates.TemplateResponse(
+        request=request,
+        name="journal/edit.html",
+        context={"user": user, "j": journal},
+    )
+
+
+@router.post("/{jid}/edit")
+async def journal_edit(
+    jid: int,
+    user: Annotated[User, Depends(auth.require_user)],
+    session: Annotated[AsyncSession, Depends(db.get_session)],
+    ticker_name: str = Form(...),
+    action: str = Form(...),
+    price_at_decision: float = Form(None),
+    shares: int = Form(None),
+    reasoning: str = Form(...),
+    action_plan: str = Form(""),
+    target_price: float = Form(None),
+    stop_loss_price: float = Form(None),
+    expected_hold_period: str = Form(""),
+    if_drop_10pct: str = Form(""),
+):
+    journal = await session.get(DecisionJournal, jid)
+    if not journal or journal.user_id != user.id:
+        raise HTTPException(status_code=404)
+    journal.ticker_name = ticker_name.strip()
+    journal.action = action
+    journal.price_at_decision = price_at_decision
+    journal.shares = shares
+    journal.reasoning = reasoning
+    journal.action_detail = action_plan or None
+    journal.target_price = target_price
+    journal.stop_loss_price = stop_loss_price
+    journal.expected_hold_period = expected_hold_period or None
+    journal.if_drop_10pct = if_drop_10pct or None
+    await session.commit()
+    return RedirectResponse(f"/journal/{jid}", status_code=303)
 
 @router.post("/{jid}/close")
 async def journal_close(

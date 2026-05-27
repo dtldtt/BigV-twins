@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from . import db, openclaw_client
 from .db import BloggerDailyBrief, TickerOpinionLog
@@ -96,6 +96,33 @@ async def extract_opinions_from_brief(
                 # Likely UNIQUE constraint — already extracted for this date
                 continue
         await session.commit()
+
+    # Async backfill price_at_opinion
+    if count > 0:
+        try:
+            from .daily_brief import get_watchlist_quotes
+            class _FW:
+                def __init__(s, t): s.ticker=t; s.name=t; s.market='A'; s.note=''; s.id=0
+            tickers_to_fill = [op.get("ticker") for op in opinions if op.get("ticker")]
+            if tickers_to_fill:
+                import asyncio
+                loop = asyncio.get_running_loop()
+                quotes = await loop.run_in_executor(
+                    None, get_watchlist_quotes, [_FW(t) for t in set(tickers_to_fill)]
+                )
+                price_map = {q["ticker"]: q.get("current") for q in quotes if q.get("ok")}
+                async with db._SessionFactory() as s2:
+                    for t, price in price_map.items():
+                        if price:
+                            await s2.execute(
+                                text("UPDATE ticker_opinion_log SET price_at_opinion = :p "
+                                     "WHERE ticker = :t AND opinion_date = :d AND price_at_opinion IS NULL"),
+                                {"p": price, "t": t, "d": brief_date},
+                            )
+                    await s2.commit()
+                log.info("backfilled prices for %d tickers", len(price_map))
+        except Exception as e:
+            log.warning("price backfill failed: %s", e)
 
     log.info("extracted %d opinions for %s/%s", count, blogger_slug, brief_date)
     return count

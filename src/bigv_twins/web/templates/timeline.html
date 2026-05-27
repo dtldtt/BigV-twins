@@ -56,4 +56,108 @@
 .tl-price { font-size:0.8rem; color:#888; margin-left:0.5rem; }
 .tl-summary { font-size:0.85rem; color:#555; margin:0.3rem 0 0; }
 </style>
+
+<!-- Consensus trend chart -->
+{% if by_date|length >= 2 %}
+<section style="margin-top:2rem">
+  <h3>📈 博主共识变化</h3>
+  <div class="chart-container">
+    <canvas id="consensus-chart" height="120"></canvas>
+  </div>
+</section>
+
+<script>
+(function() {
+  const data = [
+    {% for date, ops in by_date.items() %}
+    {
+      date: "{{ date }}",
+      bullish: {{ ops|selectattr("sentiment", "equalto", "bullish")|list|length }},
+      bearish: {{ ops|selectattr("sentiment", "equalto", "bearish")|list|length + ops|selectattr("sentiment", "equalto", "avoid")|list|length }},
+    },
+    {% endfor %}
+  ].reverse();
+
+  const canvas = document.getElementById('consensus-chart');
+  const ctx = canvas.getContext('2d');
+  const W = canvas.parentElement.clientWidth;
+  canvas.width = W;
+  canvas.height = 140;
+
+  const pad = {l:50, r:20, t:10, b:30};
+  const cw = W - pad.l - pad.r;
+  const ch = 140 - pad.t - pad.b;
+
+  // Find max value
+  let maxV = 1;
+  data.forEach(d => { maxV = Math.max(maxV, d.bullish, d.bearish); });
+  maxV = Math.ceil(maxV * 1.2);
+
+  // Draw axes
+  ctx.strokeStyle = '#ddd';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(pad.l, pad.t);
+  ctx.lineTo(pad.l, pad.t + ch);
+  ctx.lineTo(pad.l + cw, pad.t + ch);
+  ctx.stroke();
+
+  // Y labels
+  ctx.fillStyle = '#999';
+  ctx.font = '11px sans-serif';
+  ctx.textAlign = 'right';
+  for (let i = 0; i <= maxV; i++) {
+    const y = pad.t + ch - (i / maxV * ch);
+    ctx.fillText(i, pad.l - 5, y + 4);
+  }
+
+  if (data.length < 2) return;
+  const dx = cw / (data.length - 1);
+
+  // Draw lines
+  function drawLine(key, color) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    data.forEach((d, i) => {
+      const x = pad.l + i * dx;
+      const y = pad.t + ch - (d[key] / maxV * ch);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    });
+    ctx.stroke();
+    // Dots
+    data.forEach((d, i) => {
+      const x = pad.l + i * dx;
+      const y = pad.t + ch - (d[key] / maxV * ch);
+      ctx.beginPath();
+      ctx.arc(x, y, 3, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+    });
+  }
+
+  drawLine('bullish', '#4caf50');
+  drawLine('bearish', '#f44336');
+
+  // X labels (dates)
+  ctx.fillStyle = '#999';
+  ctx.font = '10px sans-serif';
+  ctx.textAlign = 'center';
+  const step = Math.max(1, Math.floor(data.length / 6));
+  data.forEach((d, i) => {
+    if (i % step === 0 || i === data.length - 1) {
+      ctx.fillText(d.date.slice(5), pad.l + i * dx, pad.t + ch + 16);
+    }
+  });
+
+  // Legend
+  ctx.font = '12px sans-serif';
+  ctx.fillStyle = '#4caf50';
+  ctx.fillText('● 看多', pad.l + 30, pad.t + ch + 28);
+  ctx.fillStyle = '#f44336';
+  ctx.fillText('● 看空', pad.l + 90, pad.t + ch + 28);
+})();
+</script>
+{% endif %}
+
 {% endblock %}
