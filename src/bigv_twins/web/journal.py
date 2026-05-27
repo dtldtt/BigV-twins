@@ -246,6 +246,11 @@ async def journal_list(
     total_cost = sum((p["cost_basis"] * p["shares"]) for p in portfolio if p["cost_basis"])
     total_pnl_pct = (total_pnl / total_cost * 100) if total_cost > 0 else None
 
+    # Adjust displayed capital to include unrealized PnL
+    display_capital = total_capital
+    if total_capital and total_pnl:
+        display_capital = total_capital + total_pnl / 10000  # pnl is in yuan, capital in 万
+
     return templates.TemplateResponse(
         request=request,
         name="journal/list.html",
@@ -255,7 +260,8 @@ async def journal_list(
             "price_map": price_map,
             "status_filter": status_filter,
             "portfolio": portfolio,
-            "total_capital": total_capital,
+            "total_capital": display_capital,
+            "base_capital": total_capital,
             "total_market_value": total_market_value,
             "total_pnl": total_pnl,
             "total_pnl_pct": total_pnl_pct,
@@ -265,12 +271,20 @@ async def journal_list(
 
 @router.post("/capital")
 async def set_capital(
+    request: Request,
     user: Annotated[User, Depends(auth.require_user)],
     session: Annotated[AsyncSession, Depends(db.get_session)],
-    total_capital: float = Form(...),
+    mode: str = Form("set"),
+    total_capital: float = Form(None),
+    amount: float = Form(None),
 ):
     user_obj = await session.get(User, user.id)
-    user_obj.total_capital = total_capital
+    if mode == "set" and total_capital is not None:
+        user_obj.total_capital = total_capital
+    elif mode == "deposit" and amount:
+        user_obj.total_capital = (user_obj.total_capital or 0) + amount
+    elif mode == "withdraw" and amount:
+        user_obj.total_capital = max(0, (user_obj.total_capital or 0) - amount)
     await session.commit()
     return RedirectResponse("/journal", status_code=303)
 
