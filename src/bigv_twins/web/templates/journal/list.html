@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% block title %}投资决策日志 · 赛博大V{% endblock %}
+{% block title %}投资记录 · 赛博大V{% endblock %}
 
 {% block content %}
 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem">
-  <h2 style="margin:0">📝 投资决策日志</h2>
+  <h2 style="margin:0">📝 投资记录</h2>
   <a href="/journal/new" role="button">+ 新建记录</a>
 </div>
 
@@ -112,8 +112,9 @@
 </section>
 {% endif %}
 
-<!-- Filter tabs -->
-<div style="margin:1.5rem 0 0.8rem; display:flex; gap:1rem; font-size:0.85rem; border-bottom:1px solid #eee; padding-bottom:0.5rem">
+<!-- Transactions section -->
+<h3 style="margin:1.5rem 0 0.5rem">📈 交易操作与思路记录</h3>
+<div style="margin:0 0 0.8rem; display:flex; gap:1rem; font-size:0.85rem; border-bottom:1px solid #eee; padding-bottom:0.5rem">
   <a href="/journal?status=all" {% if status_filter == 'all' %}style="font-weight:bold; color:#333"{% endif %}>全部</a>
   <a href="/journal?status=active" {% if status_filter == 'active' %}style="font-weight:bold; color:#333"{% endif %}>持仓中</a>
   <a href="/journal?status=closed" {% if status_filter == 'closed' %}style="font-weight:bold; color:#333"{% endif %}>已清仓</a>
@@ -155,6 +156,41 @@
 </div>
 {% endif %}
 
+
+<!-- 投资随笔 -->
+<section id="notes" style="margin-top:2.5rem; border-top:2px solid #f0f0f0; padding-top:1.5rem">
+  <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem">
+    <h3 style="margin:0">✍ 投资随笔</h3>
+  </div>
+  <p class="muted" style="font-size:0.82rem; margin-top:-0.5rem; margin-bottom:1rem">
+    记录你的投资心得、市场感悟、反思教训。不绑定具体交易，纯粹的思考记录。
+  </p>
+
+  <!-- Write new note -->
+  <form method="post" action="/journal/note" style="margin-bottom:1.5rem">
+    <textarea name="content" rows="3" required placeholder="今天的投资感悟…比如：今天忍住没追高，感觉比以前有进步了。" style="width:100%; font-size:0.9rem"></textarea>
+    <button type="submit" class="capital-btn" style="margin-top:0.3rem">记录</button>
+  </form>
+
+  <!-- Notes list -->
+  {% if notes %}
+  <div class="notes-list">
+    {% for n in notes %}
+    <div class="note-item">
+      <div class="note-content">{{ n.content }}</div>
+      <div class="note-meta">
+        <small class="muted">{{ n.created_at.strftime("%Y-%m-%d %H:%M") if n.created_at else "" }}</small>
+        <form method="post" action="/journal/note/{{ n.id }}/delete" style="display:inline; margin:0"
+              onsubmit="return confirm('删除这条随笔？')">
+          <button type="submit" style="background:none; border:none; color:#999; font-size:0.75rem; cursor:pointer; padding:0">删除</button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</section>
+
 <style>
 .capital-bar { background:#f0f7ff; border:1px solid #cce5ff; border-radius:6px; padding:0.6rem 1rem; margin-bottom:1.2rem; font-size:0.9rem; }
 .capital-display { display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; }
@@ -192,5 +228,9 @@
 .journal-price-row { display:flex; justify-content:space-between; font-size:0.83rem; }
 .journal-pnl { font-weight:bold; }
 .journal-reasoning { font-size:0.82rem; color:#555; margin:0.2rem 0; }
+.notes-list { display:flex; flex-direction:column; gap:0.5rem; }
+.note-item { padding:0.7rem 1rem; background:#fafafa; border-radius:6px; border-left:3px solid #e0e0e0; }
+.note-content { font-size:0.9rem; white-space:pre-wrap; line-height:1.6; }
+.note-meta { display:flex; justify-content:space-between; align-items:center; margin-top:0.4rem; }
 </style>
 {% endblock %}

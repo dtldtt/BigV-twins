@@ -17,13 +17,13 @@
         <li><a href="/chat" style="text-decoration:none">💬 对话</a></li>
         <li><a href="/multi" style="text-decoration:none">⚡ 多人</a></li>
         <li><a href="/report" style="text-decoration:none">📊 投资日报</a></li>
-        <li><a href="/journal" style="text-decoration:none">📝 决策日志</a></li>
-        <li><a href="/changelog" style="text-decoration:none">📋 更新日志</a></li>
+        <li><a href="/journal" style="text-decoration:none">📝 投资记录</a></li>
         <li><a href="/search" style="text-decoration:none">🔍 搜索</a></li>
       {% endif %}
     </ul>
     <ul>
       {% if user %}
+        <li><a href="/changelog" style="text-decoration:none; font-size:0.85rem; color:#888">📋 更新日志</a></li>
         <li><span class="muted">{{ user.username }}{% if user.role == "admin" %} · admin{% endif %}</span></li>
         {% if user.role == "admin" %}<li><a href="/admin">管理</a></li>{% endif %}
         <li>

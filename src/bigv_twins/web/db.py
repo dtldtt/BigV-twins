@@ -370,6 +370,21 @@ class DecisionJournal(Base):
 
     user: Mapped[User] = relationship()
 
+
+
+class InvestmentNote(Base):
+    """投资随笔 — 用户自由记录投资心得，不绑定具体交易。"""
+    __tablename__ = "investment_notes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+
+    user: Mapped[User] = relationship()
+
 async def init_db() -> None:
     """Create tables if missing. Idempotent; called at app startup.
 

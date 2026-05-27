@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bigv_twins.config import BY_SLUG
 
 from . import auth, db
-from .db import BloggerDailyBrief, DecisionJournal, User, UserWatchlist
+from .db import BloggerDailyBrief, DecisionJournal, InvestmentNote, User, UserWatchlist
 from bigv_twins.stock_data import resolve_ticker
 from .daily_brief import get_watchlist_quotes
 
@@ -252,6 +252,13 @@ async def journal_list(
     if total_capital and total_pnl:
         display_capital = total_capital + total_pnl / 10000  # pnl is in yuan, capital in 万
 
+    # Fetch investment notes
+    notes_q = select(InvestmentNote).where(
+        InvestmentNote.user_id == user.id
+    ).order_by(InvestmentNote.created_at.desc()).limit(20)
+    notes_rows = await session.execute(notes_q)
+    notes = list(notes_rows.scalars())
+
     return templates.TemplateResponse(
         request=request,
         name="journal/list.html",
@@ -266,6 +273,7 @@ async def journal_list(
             "total_market_value": total_market_value,
             "total_pnl": total_pnl,
             "total_pnl_pct": total_pnl_pct,
+            "notes": notes,
         },
     )
 
@@ -424,3 +432,29 @@ async def journal_close(
     journal.closed_reason = closed_reason or None
     await session.commit()
     return RedirectResponse(f"/journal/{jid}", status_code=303)
+
+
+@router.post("/note")
+async def create_note(
+    user: Annotated[User, Depends(auth.require_user)],
+    session: Annotated[AsyncSession, Depends(db.get_session)],
+    content: str = Form(...),
+):
+    note = InvestmentNote(user_id=user.id, content=content.strip())
+    session.add(note)
+    await session.commit()
+    return RedirectResponse("/journal#notes", status_code=303)
+
+
+@router.post("/note/{nid}/delete")
+async def delete_note(
+    nid: int,
+    user: Annotated[User, Depends(auth.require_user)],
+    session: Annotated[AsyncSession, Depends(db.get_session)],
+):
+    note = await session.get(InvestmentNote, nid)
+    if not note or note.user_id != user.id:
+        raise HTTPException(status_code=404)
+    await session.delete(note)
+    await session.commit()
+    return RedirectResponse("/journal#notes", status_code=303)
