@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}{{ stock_name }} ({{ ticker }}) · 个股研究{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ul>
+    <li><a href="/report">← 投资日报</a></li>
+    <li>{{ stock_name }} ({{ ticker }})</li>
+  </ul>
+</nav>
+
+<!-- Stock header -->
+<header class="stock-header">
+  <div>
+    <h2 style="margin:0">{{ stock_name }}</h2>
+    <code>{{ ticker }}</code>
+  </div>
+  <div class="stock-price">
+    {% if quote.current %}
+      <span class="stock-cur">¥{{ "%.2f"|format(quote.current) }}</span>
+      <span class="stock-chg {% if quote.change_pct and quote.change_pct > 0 %}up{% elif quote.change_pct and quote.change_pct < 0 %}down{% endif %}">
+        {{ "%+.2f"|format(quote.change_pct or 0) }}%
+      </span>
+    {% else %}
+      <span class="muted">行情暂不可用</span>
+    {% endif %}
+  </div>
+</header>
+
+<!-- Fundamentals bar -->
+{% if quote.pe or quote.pb or quote.market_cap %}
+<div class="stock-fundamentals">
+  {% if quote.pe %}<div class="fund-item"><span class="fund-label">PE(TTM)</span><span class="fund-value">{{ "%.1f"|format(quote.pe) }}</span></div>{% endif %}
+  {% if quote.pb %}<div class="fund-item"><span class="fund-label">PB</span><span class="fund-value">{{ "%.2f"|format(quote.pb) }}</span></div>{% endif %}
+  {% if quote.market_cap %}<div class="fund-item"><span class="fund-label">总市值</span><span class="fund-value">{{ "%.0f"|format(quote.market_cap) }}亿</span></div>{% endif %}
+</div>
+{% endif %}
+
+<!-- Quick actions -->
+<div class="stock-actions">
+  <a href="/chat/graham?ticker={{ ticker }}" class="btn-action">💬 问格雷厄姆</a>
+  <a href="/chat/lynch?ticker={{ ticker }}" class="btn-action">💬 问林奇</a>
+  <a href="/chat/buffett?ticker={{ ticker }}" class="btn-action">💬 问巴菲特</a>
+  <a href="/journal/new?ticker={{ ticker }}&name={{ stock_name }}" class="btn-action btn-primary">📝 记录决策</a>
+</div>
+
+<!-- Blogger mentions -->
+<section class="stock-section">
+  <h3>📢 博主近 30 天提及 ({{ mentions|length }})</h3>
+  {% if mentions %}
+  <div class="mention-list">
+    {% for m in mentions %}
+    <div class="mention-item">
+      <div class="mention-head">
+        <a href="/about/{{ m.blogger_slug }}"><strong>{{ m.blogger_name }}</strong></a>
+        <small class="muted">{{ m.date }}</small>
+      </div>
+      <p class="mention-excerpt">{{ m.brief_excerpt }}{% if m.brief_excerpt|length >= 200 %}…{% endif %}</p>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">近 30 天没有博主在日报中提及此股。</p>
+  {% endif %}
+</section>
+
+<!-- Latest brief -->
+{% if ticker_brief and ticker_brief.news_summary_md %}
+<section class="stock-section">
+  <h3>📰 最新动态 ({{ ticker_brief.brief_date }})</h3>
+  <div class="brief-box">
+    {% if ticker_brief.verdict %}
+    <span class="verdict-tag verdict-{{ ticker_brief.verdict }}">
+      {% if ticker_brief.verdict == "利好" %}🟢{% elif ticker_brief.verdict == "利空" %}🔴{% else %}⚪{% endif %} {{ ticker_brief.verdict }}
+    </span>
+    {% if ticker_brief.verdict_reason %}<small class="muted">{{ ticker_brief.verdict_reason }}</small>{% endif %}
+    {% endif %}
+    <div class="brief-content">{{ ticker_brief.news_summary_md }}</div>
+  </div>
+</section>
+{% endif %}
+
+<!-- Backtest records -->
+{% if backtests %}
+<section class="stock-section">
+  <h3>📈 回测记录</h3>
+  <table class="backtest-table">
+    <thead>
+      <tr><th>博主</th><th>提及日</th><th>入场价</th><th>退出价</th><th>个股收益</th><th>超额</th><th>状态</th></tr>
+    </thead>
+    <tbody>
+      {% for bt in backtests %}
+      <tr>
+        <td>{{ bt.blogger_name }}</td>
+        <td>{{ bt.entry_date }}</td>
+        <td>{{ "%.2f"|format(bt.entry_price) if bt.entry_price else "—" }}</td>
+        <td>{{ "%.2f"|format(bt.exit_price) if bt.exit_price else "—" }}</td>
+        <td class="{% if bt.ticker_return and bt.ticker_return > 0 %}up{% elif bt.ticker_return and bt.ticker_return < 0 %}down{% endif %}">
+          {{ "%+.1f%%"|format(bt.ticker_return * 100) if bt.ticker_return else "—" }}
+        </td>
+        <td class="{% if bt.excess_return and bt.excess_return > 0 %}up{% elif bt.excess_return and bt.excess_return < 0 %}down{% endif %}">
+          {{ "%+.1f%%"|format(bt.excess_return * 100) if bt.excess_return else "—" }}
+        </td>
+        <td>{{ bt.status }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+<style>
+.stock-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; }
+.stock-cur { font-size:1.8rem; font-weight:bold; }
+.stock-chg { font-size:1.2rem; margin-left:0.5rem; }
+.stock-chg.up { color:#e53935; }
+.stock-chg.down { color:#43a047; }
+.stock-fundamentals { display:flex; gap:2rem; padding:1rem; background:#f8f9fa; border-radius:8px; margin-bottom:1rem; }
+.fund-item { text-align:center; }
+.fund-label { display:block; font-size:0.75rem; color:#888; }
+.fund-value { font-size:1.1rem; font-weight:bold; }
+.stock-actions { display:flex; gap:0.6rem; flex-wrap:wrap; margin-bottom:2rem; }
+.btn-action { padding:0.5rem 1rem; border:1px solid #ddd; border-radius:6px; text-decoration:none; color:#333; font-size:0.85rem; }
+.btn-action:hover { background:#f0f0f0; }
+.btn-action.btn-primary { background:#0d6efd; color:#fff; border-color:#0d6efd; }
+.btn-action.btn-primary:hover { background:#0b5ed7; }
+.stock-section { margin-bottom:2rem; }
+.stock-section h3 { border-bottom:2px solid #f0f0f0; padding-bottom:0.5rem; }
+.mention-list { display:flex; flex-direction:column; gap:0.8rem; }
+.mention-item { padding:0.8rem; border:1px solid #eee; border-radius:6px; }
+.mention-head { display:flex; justify-content:space-between; margin-bottom:0.3rem; }
+.mention-excerpt { font-size:0.85rem; color:#555; margin:0; }
+.brief-box { padding:1rem; background:#fafafa; border-radius:6px; }
+.brief-content { margin-top:0.5rem; }
+.verdict-tag { padding:0.2rem 0.5rem; border-radius:4px; font-size:0.8rem; }
+.verdict-利好 { background:#e8f5e9; }
+.verdict-利空 { background:#ffebee; }
+.backtest-table { width:100%; border-collapse:collapse; font-size:0.85rem; }
+.backtest-table th, .backtest-table td { padding:0.5rem; border-bottom:1px solid #eee; text-align:center; }
+.backtest-table th { background:#f8f9fa; }
+td.up { color:#e53935; }
+td.down { color:#43a047; }
+</style>
+{% endblock %}
