@@ -92,13 +92,17 @@
 <!-- Close position -->
 {% if j.status == 'active' %}
 <section class="detail-section">
-  <h3>🔒 标记平仓</h3>
+  <h3>🔒 清仓操作</h3>
+  <p style="font-size:0.82rem; color:#888; margin-top:-0.3rem">清仓将创建一条清仓记录，并关闭该股所有持仓记录。</p>
   <form method="post" action="/journal/{{ j.id }}/close" class="close-form">
     <div class="form-row">
-      <label>平仓价格 <input type="number" name="closed_price" step="0.01" required></label>
-      <label>原因 <input type="text" name="closed_reason" placeholder="如「达到目标价」"></label>
+      <label>卖出价格 * <input type="number" name="closed_price" step="0.01" required placeholder="卖出实时价格"></label>
+      <label>卖出数量（股）<input type="number" name="closed_shares" step="1" min="0" placeholder="全部" value="{{ j.shares or '' }}"></label>
     </div>
-    <button type="submit" class="secondary">确认平仓</button>
+    <div class="form-row">
+      <label>原因 <input type="text" name="closed_reason" placeholder="如「达到目标价」「止损」"></label>
+    </div>
+    <button type="submit" class="secondary">确认清仓</button>
   </form>
 </section>
 {% elif j.closed_reason %}

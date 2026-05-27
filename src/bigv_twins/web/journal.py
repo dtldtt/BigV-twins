@@ -417,21 +417,48 @@ async def journal_detail(
 @router.post("/{jid}/close")
 async def journal_close(
     jid: int,
+    background_tasks: BackgroundTasks,
     user: Annotated[User, Depends(auth.require_user)],
     session: Annotated[AsyncSession, Depends(db.get_session)],
     closed_price: float = Form(...),
     closed_reason: str = Form(""),
+    closed_shares: int = Form(None),
 ):
     journal = await session.get(DecisionJournal, jid)
     if not journal or journal.user_id != user.id:
         raise HTTPException(status_code=404)
     from datetime import datetime
-    journal.status = "closed"
-    journal.closed_at = datetime.now()
-    journal.closed_price = closed_price
-    journal.closed_reason = closed_reason or None
+
+    # Create a new "close" journal entry as a separate trade record
+    close_entry = DecisionJournal(
+        user_id=user.id,
+        ticker=journal.ticker,
+        ticker_name=journal.ticker_name,
+        action="close",
+        action_detail=closed_reason or None,
+        price_at_decision=closed_price,
+        shares=closed_shares or journal.shares,
+        reasoning=closed_reason or "清仓",
+        status="active",
+    )
+    session.add(close_entry)
+
+    # Mark ALL active entries for this ticker as closed
+    all_rows = await session.execute(
+        select(DecisionJournal).where(
+            DecisionJournal.user_id == user.id,
+            DecisionJournal.ticker == journal.ticker,
+            DecisionJournal.status == "active",
+        )
+    )
+    for j in all_rows.scalars():
+        j.status = "closed"
+        j.closed_at = datetime.now()
+        j.closed_price = closed_price
+        j.closed_reason = closed_reason or None
+
     await session.commit()
-    return RedirectResponse(f"/journal/{jid}", status_code=303)
+    return RedirectResponse("/journal", status_code=303)
 
 
 @router.post("/note")
