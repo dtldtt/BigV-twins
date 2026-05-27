@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from bigv_twins.config import BY_SLUG
 
 from . import auth, db
-from .db import BloggerDailyBrief, DecisionJournal, InvestmentNote, User, UserWatchlist
+from .db import BloggerDailyBrief, DecisionJournal, DecisionReview, InvestmentNote, TickerOpinionLog, User, UserWatchlist
 from bigv_twins.stock_data import resolve_ticker
 from .daily_brief import get_watchlist_quotes
 
@@ -92,6 +92,15 @@ async def _fill_snapshot(journal_id: int):
             journal.blogger_opinions = json.dumps(opinions, ensure_ascii=False)
         except Exception as e:
             log.warning("blogger opinions failed for %s: %s", journal.ticker, e)
+        # Market snapshot: collect major indices
+        try:
+            from .daily_brief import get_global_indices
+            loop = asyncio.get_running_loop()
+            indices = await loop.run_in_executor(None, get_global_indices)
+            market_data = {i["name"]: i["current"] for i in indices if i.get("current")}
+            journal.market_snapshot = json.dumps(market_data, ensure_ascii=False)
+        except Exception as e:
+            log.warning("market snapshot failed: %s", e)
         journal.next_review_at = (date.today() + timedelta(days=7)).strftime("%Y-%m-%d")
         await session.commit()
 
@@ -400,6 +409,14 @@ async def journal_detail(
     snapshot = json.loads(journal.stock_snapshot) if journal.stock_snapshot else None
     opinions = json.loads(journal.blogger_opinions) if journal.blogger_opinions else []
 
+    # Fetch reviews for this journal
+    review_rows = await session.execute(
+        select(DecisionReview).where(
+            DecisionReview.journal_id == jid
+        ).order_by(DecisionReview.created_at.desc())
+    )
+    reviews = list(review_rows.scalars())
+
     return templates.TemplateResponse(
         request=request,
         name="journal/detail.html",
@@ -410,6 +427,7 @@ async def journal_detail(
             "pnl_pct": pnl_pct,
             "snapshot": snapshot,
             "opinions": opinions,
+            "reviews": reviews,
         },
     )
 
@@ -460,6 +478,57 @@ async def journal_close(
     await session.commit()
     return RedirectResponse("/journal", status_code=303)
 
+
+
+
+@router.post("/{jid}/review/now")
+async def manual_review(
+    jid: int,
+    user: Annotated[User, Depends(auth.require_user)],
+    session: Annotated[AsyncSession, Depends(db.get_session)],
+):
+    """Manually trigger a review for a journal entry."""
+    journal = await session.get(DecisionJournal, jid)
+    if not journal or journal.user_id != user.id:
+        raise HTTPException(status_code=404)
+    from .review_engine import generate_review_for_journal, _FakeW as RFakeW
+    report_md = await generate_review_for_journal(journal)
+    if report_md:
+        quotes = get_watchlist_quotes([_FakeW(journal.ticker)])
+        current_price = quotes[0].get("current") if quotes else None
+        pnl_pct = None
+        if current_price and journal.price_at_decision:
+            pnl_pct = (current_price - journal.price_at_decision) / journal.price_at_decision * 100
+        review = DecisionReview(
+            journal_id=jid,
+            user_id=user.id,
+            review_type="manual",
+            current_price=current_price,
+            price_change_pct=pnl_pct,
+            review_report_md=report_md,
+        )
+        session.add(review)
+        await session.commit()
+    return RedirectResponse(f"/journal/{jid}", status_code=303)
+
+
+@router.post("/review/{rid}/reflect")
+async def submit_reflection(
+    rid: int,
+    user: Annotated[User, Depends(auth.require_user)],
+    session: Annotated[AsyncSession, Depends(db.get_session)],
+    user_reflection: str = Form(""),
+    lesson_learned: str = Form(""),
+    action_taken: str = Form(""),
+):
+    review = await session.get(DecisionReview, rid)
+    if not review or review.user_id != user.id:
+        raise HTTPException(status_code=404)
+    review.user_reflection = user_reflection or None
+    review.lesson_learned = lesson_learned or None
+    review.action_taken = action_taken or None
+    await session.commit()
+    return RedirectResponse(f"/journal/{review.journal_id}", status_code=303)
 
 @router.post("/note")
 async def create_note(
