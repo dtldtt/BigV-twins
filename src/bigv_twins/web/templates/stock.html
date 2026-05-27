@@ -83,9 +83,9 @@
 {% endif %}
 
 <!-- Decision Journal -->
-{% if journal_entries %}
 <section class="stock-section">
-  <h3>📝 我的操作记录</h3>
+  <h3>📝 我的操作记录 ({{ journal_entries|length }}条)</h3>
+  {% if journal_entries %}
   {% for j in journal_entries %}
   <div class="mention-item">
     <div class="mention-head">
@@ -106,8 +106,10 @@
     {% endif %}
   </div>
   {% endfor %}
+  {% else %}
+  <p class="muted">暂无操作记录。</p>
+  {% endif %}
 </section>
-{% endif %}
 
 <!-- Backtest records -->
 {% if backtests %}
