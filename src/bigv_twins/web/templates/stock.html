@@ -96,9 +96,14 @@
       <small class="muted">{{ j.created_at.strftime("%Y-%m-%d") if j.created_at else "" }}</small>
       <a href="/journal/{{ j.id }}" style="margin-left:auto; font-size:0.8rem">详情 →</a>
     </div>
-    {% if j.action_detail %}<p class="mention-excerpt">计划：{{ j.action_detail[:100] }}</p>{% endif %}
-    {% if j.target_price %}<small class="muted">🎯 目标 ¥{{ "%.2f"|format(j.target_price) }}</small>{% endif %}
-    {% if j.stop_loss_price %}<small class="muted"> · ⛔ 止损 ¥{{ "%.2f"|format(j.stop_loss_price) }}</small>{% endif %}
+    {% if j.reasoning %}<p class="mention-excerpt">{{ j.reasoning[:150] }}{% if j.reasoning|length > 150 %}…{% endif %}</p>{% endif %}
+    {% if j.action_detail %}<p class="mention-excerpt" style="color:#888">📋 计划：{{ j.action_detail[:100] }}</p>{% endif %}
+    {% if j.target_price or j.stop_loss_price %}
+    <div style="font-size:0.8rem; color:#888; margin-top:0.2rem">
+      {% if j.target_price %}🎯 目标 ¥{{ "%.2f"|format(j.target_price) }}{% endif %}
+      {% if j.stop_loss_price %} · ⛔ 止损 ¥{{ "%.2f"|format(j.stop_loss_price) }}{% endif %}
+    </div>
+    {% endif %}
   </div>
   {% endfor %}
 </section>

@@ -208,7 +208,7 @@ async def journal_list(
     user: Annotated[User, Depends(auth.require_user)],
     session: Annotated[AsyncSession, Depends(db.get_session)],
 ):
-    status_filter = request.query_params.get("status", "all")
+    status_filter = request.query_params.get("status", "active")
     q = select(DecisionJournal).where(DecisionJournal.user_id == user.id)
     if status_filter == "active":
         q = q.where(DecisionJournal.status == "active")
