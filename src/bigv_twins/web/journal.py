@@ -19,6 +19,7 @@ from bigv_twins.config import BY_SLUG
 
 from . import auth, db
 from .db import BloggerDailyBrief, DecisionJournal, User, UserWatchlist
+from bigv_twins.stock_data import resolve_ticker
 from .daily_brief import get_watchlist_quotes
 
 log = logging.getLogger("bigv_twins.web.journal")
@@ -325,10 +326,28 @@ async def journal_create(
     expected_hold_period: str = Form(""),
     if_drop_10pct: str = Form(""),
 ):
+    # Resolve ticker: user can input just name OR just code
+    raw_ticker = ticker.strip()
+    raw_name = ticker_name.strip()
+    if raw_ticker and not raw_name:
+        info = resolve_ticker(raw_ticker)
+        if info:
+            raw_ticker = info.code
+            raw_name = info.name
+    elif raw_name and not raw_ticker:
+        info = resolve_ticker(raw_name)
+        if info:
+            raw_ticker = info.code
+            raw_name = info.name
+    elif raw_ticker:
+        info = resolve_ticker(raw_ticker)
+        if info and raw_name == raw_ticker:
+            raw_name = info.name
+
     journal = DecisionJournal(
         user_id=user.id,
-        ticker=ticker.strip(),
-        ticker_name=ticker_name.strip(),
+        ticker=raw_ticker,
+        ticker_name=raw_name,
         action=action,
         action_detail=action_plan or None,
         price_at_decision=price_at_decision,

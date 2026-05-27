@@ -73,6 +73,11 @@ def _a_share_board(code: str) -> str:
     return "main"
 
 
+def _is_etf(code: str) -> bool:
+    """A股 ETF 代码规则：51xxxx(沪) / 15xxxx(深) / 56xxxx(跨市)。"""
+    return code[:2] in ("51", "15", "56") and len(code) == 6
+
+
 def _load_name_map():
     """Cache code→name for A-share lookups."""
     now = time.time()
@@ -96,7 +101,7 @@ def resolve_ticker(query: str) -> Optional[TickerInfo]:
     if not query:
         return None
 
-    # pure 6-digit A-share code
+    # pure 6-digit A-share code (includes ETF)
     if re.fullmatch(r"\d{6}", query):
         df = _load_name_map()
         name = query
@@ -104,10 +109,11 @@ def resolve_ticker(query: str) -> Optional[TickerInfo]:
             row = df[df["code"] == query]
             if not row.empty:
                 name = row.iloc[0]["name"]
+        board = "etf" if _is_etf(query) else _a_share_board(query)
         return TickerInfo(
             code=query, name=name,
             prefix=_a_share_prefix(query),
-            market="a-share", board=_a_share_board(query),
+            market="a-share", board=board,
         )
 
     # HK code: 4-5 digits, optionally suffixed .HK

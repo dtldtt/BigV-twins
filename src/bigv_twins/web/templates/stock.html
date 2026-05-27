@@ -38,9 +38,11 @@
 
 <!-- Quick actions -->
 <div class="stock-actions">
+  {% if ticker_type != "etf" %}
   <a href="/chat/graham?ticker={{ ticker }}" class="btn-action">💬 问格雷厄姆</a>
   <a href="/chat/lynch?ticker={{ ticker }}" class="btn-action">💬 问林奇</a>
   <a href="/chat/buffett?ticker={{ ticker }}" class="btn-action">💬 问巴菲特</a>
+  {% endif %}
   <a href="/journal/new?ticker={{ ticker }}&name={{ stock_name }}" class="btn-action btn-primary">📝 记录决策</a>
 </div>
 
@@ -64,8 +66,8 @@
   {% endif %}
 </section>
 
-<!-- Latest brief -->
-{% if ticker_brief and ticker_brief.news_summary_md %}
+<!-- Latest brief (skip for ETF) -->
+{% if ticker_brief and ticker_brief.news_summary_md and ticker_type != "etf" %}
 <section class="stock-section">
   <h3>📰 最新动态 ({{ ticker_brief.brief_date }})</h3>
   <div class="brief-box">

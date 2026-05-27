@@ -19,12 +19,12 @@
     <legend>标的与操作</legend>
     <div class="form-row">
       <label>
-        股票代码 *
-        <input type="text" name="ticker" value="{{ prefill_ticker }}" required placeholder="如 601088 或 510300" maxlength="10">
+        股票代码
+        <input type="text" name="ticker" id="ticker-input" value="{{ prefill_ticker }}" placeholder="如 601088 / 510300 / 00700" maxlength="10">
       </label>
       <label>
-        股票名称 *
-        <input type="text" name="ticker_name" value="{{ prefill_name }}" required placeholder="如 中国神华">
+        股票名称
+        <input type="text" name="ticker_name" id="name-input" value="{{ prefill_name }}" placeholder="如 中国神华（代码和名称填一个即可）">
       </label>
     </div>
     <div class="form-row">
@@ -102,6 +102,18 @@
 </form>
 
 <script>
+document.querySelector('.journal-form').addEventListener('submit', function(e) {
+  const ticker = document.getElementById('ticker-input').value.trim();
+  const name = document.getElementById('name-input').value.trim();
+  if (!ticker && !name) {
+    e.preventDefault();
+    alert('请至少填写股票代码或股票名称');
+    return;
+  }
+  // If only one is filled, copy to the other as placeholder for backend resolution
+  if (ticker && !name) document.getElementById('name-input').value = ticker;
+  if (name && !ticker) document.getElementById('ticker-input').value = name;
+});
 const sel = document.getElementById('action-select');
 const priceLabel = document.getElementById('price-label');
 const sharesLabel = document.getElementById('shares-label');

@@ -24,6 +24,7 @@ from bigv_twins.config import BY_SLUG
 
 from . import auth, db
 from .db import BacktestEntry, BloggerDailyBrief, DecisionJournal, TickerDailyBrief, User
+from bigv_twins.stock_data import resolve_ticker, _is_etf
 from .daily_brief import get_watchlist_quotes
 
 log = logging.getLogger("bigv_twins.web.stock")
@@ -119,6 +120,11 @@ async def stock_page(
         ).order_by(DecisionJournal.created_at.desc()).limit(10)
     )
     journal_entries = list(journal_rows.scalars())
+
+    # Determine ticker type for conditional display
+    is_etf = _is_etf(ticker)
+    is_hk = len(ticker) == 5 and ticker.isdigit()
+    ticker_type = "etf" if is_etf else ("hk" if is_hk else "stock")
 
     # Stock name: prefer from quote, fallback to ticker
     stock_name = quote.get("name") or ticker

@@ -42,21 +42,37 @@ _CACHE_TTL_S = 60
 
 
 def _parse_index_tilde(symbol: str, payload: str) -> dict | None:
-    """Standard Tencent qt format: tilde-separated, 50+ fields."""
+    """Standard Tencent qt format: tilde-separated, 50+ fields.
+    
+    A股: field[46]=PB, field[45]=总市值(亿)
+    港股: field[46]=英文名(非数字), field[47]=PB, field[44]=总市值(亿)
+    ETF:  PE/PB 为空
+    """
     try:
         fields = payload.split("~")
         def _f(idx):
-            return float(fields[idx]) if len(fields) > idx and fields[idx] not in ("", "-") else None
+            try:
+                v = fields[idx] if len(fields) > idx else ""
+                if v in ("", "-", "0"):
+                    return None
+                return float(v)
+            except (ValueError, TypeError):
+                return None
+
+        is_hk = symbol.startswith("hk")
+        # PB: A股在[46]，港股在[47]（[46]是英文名）
+        pb = _f(47) if is_hk else _f(46)
+        
         return {
             "symbol": symbol,
-            "name": fields[1] or symbol,
+            "name": fields[1] if len(fields) > 1 else symbol,
             "current": _f(3),
             "prev_close": _f(4),
             "change_amt": _f(31),
             "change_pct": _f(32),
             "pe": _f(39),
-            "pb": _f(46),
-            "market_cap": _f(45),
+            "pb": pb,
+            "market_cap": _f(45) or _f(44),
         }
     except (ValueError, IndexError) as e:
         log.warning("parse_index_tilde failed for %s: %s", symbol, e)
