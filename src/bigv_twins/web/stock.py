@@ -171,5 +171,6 @@ async def stock_page(
             "ticker_brief": ticker_brief,
             "backtests": backtests,
             "journal_entries": journal_entries,
+            "ticker_type": ticker_type,
         },
     )
