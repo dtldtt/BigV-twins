@@ -38,6 +38,7 @@ class User(Base):
     invite_id: Mapped[int | None] = mapped_column(ForeignKey("invites.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    total_capital: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     conversations: Mapped[list["Conversation"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"

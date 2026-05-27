@@ -237,7 +237,7 @@ async def journal_list(
                 price_map[qq["ticker"]] = qq["current"]
                 quote_map[qq["ticker"]] = qq
 
-    total_capital = user.total_capital if hasattr(user, 'total_capital') and user.total_capital else None
+    total_capital = user.total_capital or None
     portfolio = _build_portfolio(all_active, price_map, quote_map, total_capital)
 
     # Total portfolio stats
@@ -279,13 +279,17 @@ async def set_capital(
     amount: float = Form(None),
 ):
     user_obj = await session.get(User, user.id)
+    log.info("set_capital called: mode=%s total_capital=%s amount=%s user_id=%s current=%s",
+             mode, total_capital, amount, user.id, user_obj.total_capital)
     if mode == "set" and total_capital is not None:
         user_obj.total_capital = total_capital
     elif mode == "deposit" and amount:
         user_obj.total_capital = (user_obj.total_capital or 0) + amount
     elif mode == "withdraw" and amount:
         user_obj.total_capital = max(0, (user_obj.total_capital or 0) - amount)
+    log.info("set_capital after: total_capital=%s", user_obj.total_capital)
     await session.commit()
+    log.info("set_capital committed")
     return RedirectResponse("/journal", status_code=303)
 
 
