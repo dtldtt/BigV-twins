@@ -372,6 +372,48 @@ class DecisionJournal(Base):
 
 
 
+
+
+class TickerOpinionLog(Base):
+    """博主对个股的每日观点记录（自动从 brief 提取）。"""
+    __tablename__ = "ticker_opinion_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    ticker: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    ticker_name: Mapped[str] = mapped_column(String(60), nullable=False)
+    blogger_slug: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    opinion_date: Mapped[str] = mapped_column(String(10), nullable=False)
+    sentiment: Mapped[str] = mapped_column(String(16), nullable=False)
+    summary: Mapped[str] = mapped_column(Text, nullable=False)
+    source_brief_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    price_at_opinion: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("ticker", "blogger_slug", "opinion_date", name="uq_opinion_ticker_blogger_date"),
+    )
+
+
+
+class DecisionReview(Base):
+    """决策回顾记录 — 定期自动生成的投资决策回顾。"""
+    __tablename__ = "decision_review"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    journal_id: Mapped[int] = mapped_column(ForeignKey("decision_journal.id"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
+    review_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    current_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    price_change_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    current_snapshot: Mapped[str | None] = mapped_column(Text, nullable=True)
+    exit_signals_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    blogger_opinions_since: Mapped[str | None] = mapped_column(Text, nullable=True)
+    review_report_md: Mapped[str | None] = mapped_column(Text, nullable=True)
+    user_reflection: Mapped[str | None] = mapped_column(Text, nullable=True)
+    lesson_learned: Mapped[str | None] = mapped_column(Text, nullable=True)
+    action_taken: Mapped[str | None] = mapped_column(String(30), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+
 class InvestmentNote(Base):
     """投资随笔 — 用户自由记录投资心得，不绑定具体交易。"""
     __tablename__ = "investment_notes"

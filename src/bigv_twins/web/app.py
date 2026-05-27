@@ -32,6 +32,9 @@ from .report import router as report_router
 from .search import rebuild_search_index, router as search_router
 from .journal import router as journal_router
 from .stock import router as stock_router
+from .consensus import router as consensus_router
+from .timeline import router as timeline_router
+from .review_engine import run_scheduled_reviews
 from .ticker_brief import generate_ticker_briefs_for_day
 
 
@@ -93,6 +96,10 @@ async def lifespan(app: FastAPI):
                           CronTrigger(hour=hh, minute=mm),
                           id=f"ticker_brief_{jid}",
                           misfire_grace_time=1800, replace_existing=True)
+    # Decision review — daily at 20:00
+    scheduler.add_job(run_scheduled_reviews, CronTrigger(hour=20, minute=0),
+                      id="decision_review", misfire_grace_time=1800, replace_existing=True)
+
     scheduler.start()
     app.state.scheduler = scheduler
     try:
@@ -131,6 +138,8 @@ def create_app() -> FastAPI:
     app.include_router(about_router)
     app.include_router(journal_router)
     app.include_router(stock_router)
+    app.include_router(timeline_router)
+    app.include_router(consensus_router)
 
     @app.get("/changelog", response_class=HTMLResponse)
     async def changelog_page(

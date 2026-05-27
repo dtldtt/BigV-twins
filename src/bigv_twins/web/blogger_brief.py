@@ -217,6 +217,20 @@ async def generate_briefs_for_day(day_str: str | None = None) -> dict[str, int]:
             try:
                 await s.commit()
                 generated += 1
+                # Extract per-ticker sentiment (Phase 1C)
+                if result["mentioned_tickers"]:
+                    try:
+                        from .opinion_extractor import extract_opinions_from_brief
+                        await extract_opinions_from_brief(
+                            blogger_slug=b.slug,
+                            blogger_name=b.name,
+                            brief_date=day_str,
+                            brief_md=brief_md,
+                            mentioned_tickers=result["mentioned_tickers"],
+                            brief_id=row.id,
+                        )
+                    except Exception as e:
+                        log.warning("opinion extraction failed for %s: %s", b.slug, e)
             except IntegrityError:
                 await s.rollback()
                 skipped += 1  # race with another instance

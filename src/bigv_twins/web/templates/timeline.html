@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}{{ stock_name }} · 观点时间线{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ul>
+    <li><a href="/stock/{{ ticker }}">← {{ stock_name }}</a></li>
+    <li>观点时间线</li>
+  </ul>
+</nav>
+
+<h2>📊 {{ stock_name }} ({{ ticker }}) · 博主观点时间线</h2>
+<p class="muted">共 {{ total_count }} 条观点记录</p>
+
+{% if by_date %}
+<div class="timeline">
+  {% for date, ops in by_date.items() %}
+  <div class="tl-day">
+    <div class="tl-date">{{ date }}</div>
+    <div class="tl-entries">
+      {% for op in ops %}
+      <div class="tl-entry tl-{{ op.sentiment }}">
+        <span class="tl-sentiment">
+          {% if op.sentiment == 'bullish' %}🟢 看多
+          {% elif op.sentiment == 'bearish' %}🔴 看空
+          {% elif op.sentiment == 'avoid' %}⚫ 回避
+          {% else %}⚪ 中性{% endif %}
+        </span>
+        <strong>{{ op.blogger_name }}</strong>
+        {% if op.price %}<span class="tl-price">¥{{ "%.2f"|format(op.price) }}</span>{% endif %}
+        <p class="tl-summary">{{ op.summary }}</p>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div style="text-align:center; padding:3rem; color:#888">
+  <p>暂无观点记录。</p>
+  <p style="font-size:0.85rem">系统每天自动从博主日报中提取对个股的观点，数据会逐步积累。</p>
+</div>
+{% endif %}
+
+<style>
+.timeline { display:flex; flex-direction:column; gap:1rem; }
+.tl-day { display:flex; gap:1rem; }
+.tl-date { min-width:5.5rem; font-size:0.82rem; color:#888; padding-top:0.3rem; font-weight:bold; }
+.tl-entries { flex:1; display:flex; flex-direction:column; gap:0.5rem; }
+.tl-entry { padding:0.6rem 1rem; border-radius:6px; border-left:3px solid #ddd; background:#fafafa; }
+.tl-entry.tl-bullish { border-left-color:#4caf50; background:#f1f8e9; }
+.tl-entry.tl-bearish { border-left-color:#f44336; background:#fce4ec; }
+.tl-entry.tl-avoid { border-left-color:#616161; background:#f5f5f5; }
+.tl-entry.tl-neutral { border-left-color:#ff9800; background:#fff8e1; }
+.tl-sentiment { font-size:0.75rem; margin-right:0.5rem; }
+.tl-price { font-size:0.8rem; color:#888; margin-left:0.5rem; }
+.tl-summary { font-size:0.85rem; color:#555; margin:0.3rem 0 0; }
+</style>
+{% endblock %}

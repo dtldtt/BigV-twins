@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}共识仪表板 · 赛博大V{% endblock %}
+
+{% block content %}
+<h2>🎯 博主共识仪表板</h2>
+<p class="muted">
+  最近 {{ days }} 天内 · {{ total_opinions }} 条观点 · {{ total_tickers }} 只股票
+  <span style="margin-left:1rem">
+    {% for d in [7, 14, 30] %}
+      <a href="/consensus?days={{ d }}" {% if days == d %}style="font-weight:bold"{% endif %}>{{ d }}天</a>
+      {% if not loop.last %} · {% endif %}
+    {% endfor %}
+  </span>
+</p>
+
+<!-- High Consensus -->
+<section class="consensus-section">
+  <h3>🟢 高共识（3+ 博主同向）</h3>
+  {% if high_consensus %}
+  <div class="consensus-grid">
+    {% for item in high_consensus %}
+    <div class="consensus-card consensus-{{ item.direction }}">
+      <div class="cc-head">
+        <a href="/stock/{{ item.ticker }}"><strong>{{ item.ticker_name }}</strong></a>
+        <code>{{ item.ticker }}</code>
+        <span class="cc-badge">{{ item.count }} 人{% if item.direction == 'bullish' %}看多{% else %}看空{% endif %}</span>
+      </div>
+      <div class="cc-opinions">
+        {% for op in item.opinions %}
+        <div class="cc-op">
+          <span class="cc-sentiment cc-{{ op.sentiment }}">
+            {% if op.sentiment == 'bullish' %}↑{% elif op.sentiment == 'bearish' %}↓{% elif op.sentiment == 'avoid' %}✗{% else %}—{% endif %}
+          </span>
+          <span>{{ op.blogger_name }}</span>
+          <small class="muted">{{ op.summary }}</small>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">暂无高共识标的（需要 3 位以上博主对同一只股票持相同方向）。</p>
+  {% endif %}
+</section>
+
+<!-- High Divergence -->
+<section class="consensus-section">
+  <h3>⚡ 高分歧（有人看多有人看空）</h3>
+  {% if high_divergence %}
+  <div class="consensus-grid">
+    {% for item in high_divergence %}
+    <div class="consensus-card consensus-diverge">
+      <div class="cc-head">
+        <a href="/stock/{{ item.ticker }}"><strong>{{ item.ticker_name }}</strong></a>
+        <code>{{ item.ticker }}</code>
+        <span class="cc-badge cc-badge-diverge">分歧</span>
+      </div>
+      <div class="cc-opinions">
+        {% for op in item.opinions %}
+        <div class="cc-op">
+          <span class="cc-sentiment cc-{{ op.sentiment }}">
+            {% if op.sentiment == 'bullish' %}↑{% elif op.sentiment == 'bearish' %}↓{% elif op.sentiment == 'avoid' %}✗{% else %}—{% endif %}
+          </span>
+          <span>{{ op.blogger_name }}</span>
+          <small class="muted">{{ op.summary }}</small>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">暂无高分歧标的。</p>
+  {% endif %}
+</section>
+
+<!-- Solo Picks -->
+<section class="consensus-section">
+  <h3>👁 独家视角（仅 1 人提及）</h3>
+  {% if solo_picks %}
+  <div class="solo-list">
+    {% for item in solo_picks %}
+    <div class="solo-item">
+      <a href="/stock/{{ item.ticker }}">{{ item.ticker_name }}</a>
+      <code>{{ item.ticker }}</code>
+      {% for op in item.opinions %}
+      <span class="cc-sentiment cc-{{ op.sentiment }}">
+        {% if op.sentiment == 'bullish' %}↑{% elif op.sentiment == 'bearish' %}↓{% else %}—{% endif %}
+      </span>
+      <span>{{ op.blogger_name }}</span>
+      <small class="muted">{{ op.summary }}</small>
+      {% endfor %}
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">暂无独家视角。</p>
+  {% endif %}
+</section>
+
+<style>
+.consensus-section { margin-bottom:2rem; }
+.consensus-section h3 { border-bottom:2px solid #f0f0f0; padding-bottom:0.5rem; }
+.consensus-grid { display:flex; flex-direction:column; gap:0.8rem; }
+.consensus-card { border:1px solid #e0e0e0; border-radius:8px; padding:0.8rem 1rem; }
+.consensus-bullish { border-left:3px solid #4caf50; }
+.consensus-bearish { border-left:3px solid #f44336; }
+.consensus-diverge { border-left:3px solid #ff9800; }
+.cc-head { display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem; }
+.cc-badge { font-size:0.72rem; padding:0.1rem 0.4rem; border-radius:3px; background:#e8f5e9; color:#2e7d32; }
+.cc-badge-diverge { background:#fff3e0; color:#e65100; }
+.cc-opinions { display:flex; flex-direction:column; gap:0.3rem; }
+.cc-op { display:flex; align-items:center; gap:0.4rem; font-size:0.83rem; }
+.cc-sentiment { font-weight:bold; width:1rem; text-align:center; }
+.cc-bullish { color:#4caf50; }
+.cc-bearish, .cc-avoid { color:#f44336; }
+.cc-neutral { color:#ff9800; }
+.solo-list { display:flex; flex-direction:column; gap:0.4rem; }
+.solo-item { font-size:0.85rem; padding:0.4rem 0; border-bottom:1px solid #f0f0f0; display:flex; align-items:center; gap:0.5rem; }
+</style>
+{% endblock %}
