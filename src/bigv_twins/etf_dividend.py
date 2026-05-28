@@ -187,6 +187,14 @@ def get_etf_dividend_yield(query: str, info, current_price: Optional[float],
     if not events:
         events = _fetch_etf_dividend_em_html(code)
 
+    # Best-effort: fetch dividend policy snippet from prospectus (招募说明书)
+    distribution_policy = None
+    try:
+        from .etf_prospectus import fetch_etf_distribution_policy
+        distribution_policy = fetch_etf_distribution_policy(code)
+    except Exception:
+        pass
+
     if not events:
         return {
             "ok": True, "query": query,
@@ -195,6 +203,8 @@ def get_etf_dividend_yield(query: str, info, current_price: Optional[float],
             "current_price": current_price,
             "history": [],
             "frequency": "unknown",
+            "frequency_label": "未知（无历史分红）",
+            "distribution_policy": distribution_policy,
             "algorithm_1_historical": {"note": "未查询到分红记录（可能从未分红或新上市）"},
             "source": "akshare/fund_etf_dividend_sina + eastmoney FHSP HTML",
             "note": "未查询到 ETF 分红记录",
@@ -360,6 +370,9 @@ def get_etf_dividend_yield(query: str, info, current_price: Optional[float],
             "calculation": calc,
         })
 
+    freq_label_map = {"monthly": "月度分红", "quarterly": "季度分红",
+                       "annual": "年度分红", "irregular": "不规律分红"}
+
     return {
         "ok": True, "query": query,
         "resolved": {"code": code, "name": info.name, "market": "a-share-etf"},
@@ -367,10 +380,12 @@ def get_etf_dividend_yield(query: str, info, current_price: Optional[float],
         "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "current_price": current_price,
         "frequency": frequency,
+        "frequency_label": freq_label_map.get(frequency, frequency),
+        "distribution_policy": distribution_policy,
         "history": events[-last_n:],
         "algorithm_1_historical": algo1,
         "algorithm_2_forecast": {
             "note": "ETF 不适用预测算法 — 分红依赖底层指数/成分股，不外推"
         },
-        "source": "akshare/fund_etf_dividend_sina + eastmoney FHSP HTML",
+        "source": "akshare/fund_etf_dividend_sina + eastmoney FHSP HTML + 招募说明书 PDF",
     }
