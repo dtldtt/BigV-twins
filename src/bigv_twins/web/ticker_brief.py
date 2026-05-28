@@ -206,6 +206,59 @@ _VERDICT_SYS = (
 )
 
 
+def _aggregate_ticker_no_llm(
+    ticker: str,
+    name: str,
+    blogger_slugs: list[str],
+    notices: list[dict],
+    news_em: list[dict],
+    irm_qa: list[dict],
+    web_results: list[dict],
+) -> dict:
+    """Build a raw-data markdown summary WITHOUT LLM call.
+
+    Replaces _summarize_ticker for cost-cutting. Verdict is left empty so
+    the UI can render without the colored tag.
+    """
+    parts = []
+
+    # Top 1 most-recent notice (公告)
+    if notices:
+        n = notices[0]
+        title = n.get("title") or n.get("name") or ""
+        date = (n.get("date") or n.get("notice_date") or "")[:10]
+        parts.append(f"📋 **公告 {date}**：{title[:80]}")
+
+    # Top 3 news_em items
+    if news_em:
+        parts.append("📰 **最新动态**：")
+        for n in news_em[:3]:
+            t = n.get("time", "")[:10]
+            title = n.get("title", "")
+            parts.append(f"  · {t} {title[:60]}")
+
+    # Top 1 IRM Q&A (最新)
+    if irm_qa:
+        q = irm_qa[0]
+        date = q.get("time", "")[:10]
+        question = (q.get("question") or "")[:50]
+        answer = (q.get("answer") or "")[:80]
+        parts.append(f"💬 **互动易 {date}**：问 {question} / 答 {answer}…")
+
+    # Blogger mentions
+    if blogger_slugs:
+        parts.append(f"📢 提及博主：{'、'.join(blogger_slugs)}")
+
+    if not parts:
+        parts.append("（今日无新动态）")
+
+    return {
+        "summary_md": "\n\n".join(parts)[:1000],
+        "verdict": "",          # No verdict without LLM
+        "verdict_reason": "",
+    }
+
+
 async def _summarize_ticker(
     ticker: str,
     name: str,
@@ -349,12 +402,11 @@ async def regenerate_one_ticker_brief(
             )
             notices = _filter_notices_for_ticker(all_notices_df, ticker)
 
-        # web_search 兜底
-        search_query = f"{ticker} {name} 最新公告 新闻"
-        search_result = await asyncio.to_thread(web_search, search_query, top_k=5)
-        web_results = search_result.get("results", []) if search_result.get("ok") else []
+        # web_search disabled: not called when no LLM downstream
+        web_results = []
 
-        llm_out = await _summarize_ticker(
+        # No LLM — pure data aggregation (saves token cost)
+        llm_out = _aggregate_ticker_no_llm(
             ticker, name, blogger_slugs, notices, news_em, irm_qa, web_results,
         )
     except Exception as e:
@@ -387,7 +439,7 @@ async def regenerate_one_ticker_brief(
             row.verdict_reason = llm_out["verdict_reason"]
             row.generated_at = datetime.utcnow()
         await s.commit()
-    log.info("ticker_brief upserted: %s @ %s verdict=%s", ticker, day_str, llm_out["verdict"])
+    log.info("ticker_brief upserted: %s @ %s (no LLM, raw data only)", ticker, day_str)
     return True
 
 

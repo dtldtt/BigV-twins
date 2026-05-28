@@ -204,19 +204,18 @@ async def refresh_jin10_news() -> dict[str, int]:
         existing_ids = {r[0] for r in existing_rows.all()}
 
     new_items = [it for it in important if it["jin10_id"] not in existing_ids]
-    log.info("refresh_jin10_news: %d new items to classify", len(new_items))
+    log.info("refresh_jin10_news: %d new items to store (no LLM classify)", len(new_items))
 
     if not new_items:
         return {"fetched": len(raw), "new": 0, "errors": 0}
 
-    # LLM classification (single batched call)
-    verdicts = await classify_items_via_llm(new_items)
+    # NOTE: LLM verdict classification REMOVED to save token cost.
+    # News are short enough for users to read raw. UI omits the verdict tag.
 
-    # Persist
+    # Persist (verdict left empty so UI can render without color tag)
     errors = 0
     async with db._SessionFactory() as s:
         for it in new_items:
-            v = verdicts.get(it["jin10_id"], {"verdict": "中性", "reason": "未判断"})
             row = CachedNews(
                 jin10_id=it["jin10_id"],
                 jin10_time=it["time"],
@@ -224,8 +223,8 @@ async def refresh_jin10_news() -> dict[str, int]:
                 content=it["content"],
                 link=it["link"],
                 importance=it["importance"],
-                verdict=v["verdict"],
-                verdict_reason=v["reason"],
+                verdict="",
+                verdict_reason="",
             )
             s.add(row)
             try:
