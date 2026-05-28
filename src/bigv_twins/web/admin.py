@@ -79,6 +79,15 @@ async def token_usage_refresh_now(
     result = await refresh_token_usage()
     return result
 
+
+@router.get("/api/monthly-reports")
+async def monthly_reports_api(
+    admin_user: Annotated[User, Depends(auth.require_admin)],
+):
+    """Return list of monthly billing-cycle reports."""
+    from .token_usage import get_monthly_reports
+    return await get_monthly_reports()
+
 # ------------------------------------------------------------ invites
 
 @router.get("/invites", response_class=HTMLResponse)

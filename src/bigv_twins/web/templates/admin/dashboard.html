@@ -1,19 +1,36 @@
 {% extends "base.html" %}
 {% block title %}管理 · 赛博大V<!-- Token usage panel ============================================== -->
 <article id="token-panel" style="margin-top:1.5rem">
-  <header style="display:flex; justify-content:space-between; align-items:center">
-    <div>
-      <strong>🪙 Token 用量监控</strong>
-      <small class="muted" style="margin-left:0.6rem">每小时自动刷新 · 数据来源 OpenClaw session 日志</small>
+  <header>
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem">
+      <div>
+        <strong>🪙 Token 用量监控</strong>
+        <small class="muted" style="margin-left:0.6rem">每小时自动刷新 · 数据源 OpenClaw session 日志</small>
+      </div>
+      <button id="refresh-btn" class="secondary outline" style="padding:0.3rem 0.7rem; font-size:0.8rem; margin:0; width:auto">🔄 手动刷新</button>
     </div>
-    <div style="display:flex; gap:0.6rem; align-items:center">
-      <label style="margin:0; font-size:0.85rem">模型：</label>
-      <select id="model-select" style="margin:0; padding:0.3rem 0.6rem; font-size:0.85rem; width:auto">
-        <option value="qwen3.6-flash">qwen3.6-flash</option>
-        <option value="qwen3.6-plus">qwen3.6-plus</option>
-      </select>
-      <button id="refresh-btn" class="secondary outline" style="padding:0.3rem 0.6rem; font-size:0.8rem; margin:0; width:auto">手动刷新</button>
+
+    <div class="model-selector">
+      <label class="model-selector-label">💰 价格模型</label>
+      <div class="model-btn-group">
+        <button type="button" class="model-btn active" data-model="qwen3.6-flash">
+          <span class="model-name">qwen3.6-flash</span>
+          <span class="model-tier">经济档</span>
+          <span class="model-price">1.2 / 7.2 元/M</span>
+        </button>
+        <button type="button" class="model-btn" data-model="qwen3.6-plus">
+          <span class="model-name">qwen3.6-plus</span>
+          <span class="model-tier">均衡档</span>
+          <span class="model-price">2.0 / 12 元/M</span>
+        </button>
+        <button type="button" class="model-btn" data-model="qwen3.7-max">
+          <span class="model-name">qwen3.7-max</span>
+          <span class="model-tier">旗舰档</span>
+          <span class="model-price">12 / 36 元/M（原价）</span>
+        </button>
+      </div>
     </div>
+    <input type="hidden" id="model-select" value="qwen3.6-flash">
   </header>
 
   <!-- Headline cards -->
@@ -167,8 +184,16 @@
   });
   document.querySelector('.period-btn[data-period="intraday"]').classList.remove('outline');
 
-  // Model selector
-  document.getElementById('model-select').addEventListener('change', loadData);
+  // Model selector (button group)
+  document.querySelectorAll('.model-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.model-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('model-select').value = btn.dataset.model;
+      loadData();
+      loadMonthlyReports();
+    });
+  });
 
   // Manual refresh
   document.getElementById('refresh-btn').addEventListener('click', async () => {
@@ -181,6 +206,179 @@
 
   // Initial load
   loadData();
+})();
+</script>
+
+
+<!-- Monthly Reports Archive ===================================== -->
+<article id="monthly-archive" style="margin-top:1.5rem">
+  <header>
+    <strong>📅 月度账单归档</strong>
+    <small class="muted" style="margin-left:0.6rem">按计费周期（每月 27 日）归档 · 默认折叠</small>
+  </header>
+  <div id="monthly-list" style="margin-top:0.8rem">
+    <p class="muted">加载中…</p>
+  </div>
+</article>
+
+<style>
+/* Model selector — prominent button group */
+.model-selector {
+  margin-top: 1rem;
+  padding: 0.8rem;
+  background: linear-gradient(135deg, #f8f9ff 0%, #fff 100%);
+  border: 1px solid #e0e3ed;
+  border-radius: 10px;
+}
+.model-selector-label {
+  display: block;
+  margin: 0 0 0.6rem;
+  font-weight: bold;
+  font-size: 0.9rem;
+  color: #555;
+}
+.model-btn-group {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.6rem;
+}
+.model-btn {
+  background: #fff;
+  border: 2px solid #e0e3ed;
+  border-radius: 8px;
+  padding: 0.7rem 0.8rem;
+  cursor: pointer;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: 0;
+  width: 100%;
+  transition: all 0.15s;
+  color: #333;
+}
+.model-btn:hover {
+  border-color: #5b8dee;
+  background: #f4f8ff;
+}
+.model-btn.active {
+  border-color: #2962ff;
+  background: linear-gradient(135deg, #2962ff 0%, #1e88e5 100%);
+  color: #fff;
+  box-shadow: 0 3px 12px rgba(41,98,255,0.25);
+  transform: translateY(-1px);
+}
+.model-btn .model-name {
+  font-size: 0.95rem;
+  font-weight: bold;
+}
+.model-btn .model-tier {
+  font-size: 0.72rem;
+  opacity: 0.7;
+}
+.model-btn .model-price {
+  font-size: 0.72rem;
+  opacity: 0.85;
+  margin-top: 0.1rem;
+  font-family: monospace;
+}
+
+/* Monthly reports */
+.monthly-card {
+  border: 1px solid #e0e3ed;
+  border-radius: 8px;
+  margin-bottom: 0.6rem;
+  overflow: hidden;
+}
+.monthly-card details {
+  margin: 0;
+}
+.monthly-card summary {
+  padding: 0.7rem 1rem;
+  background: #f8f9fa;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  list-style: none;
+}
+.monthly-card summary::-webkit-details-marker { display: none; }
+.monthly-card summary::after {
+  content: "▼";
+  font-size: 0.7rem;
+  color: #888;
+  transition: transform 0.2s;
+}
+.monthly-card details[open] summary::after { transform: rotate(180deg); }
+.monthly-card summary:hover { background: #f0f2f5; }
+.monthly-summary-info { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
+.month-range { font-weight: bold; }
+.month-status { font-size: 0.78rem; padding: 0.15rem 0.5rem; border-radius: 4px; }
+.month-status-in_progress { background: #fff3e0; color: #e65100; }
+.month-status-complete { background: #e8f5e9; color: #2e7d32; }
+.month-status-partial_data { background: #ffebee; color: #c62828; }
+.month-quick-stat { font-size: 0.82rem; color: #555; }
+.monthly-content {
+  padding: 1rem 1.2rem;
+  background: #fff;
+  border-top: 1px solid #f0f0f0;
+}
+.monthly-content h1, .monthly-content h2, .monthly-content h3 {
+  margin: 0.8rem 0 0.4rem;
+  font-size: 1rem;
+}
+.monthly-content h1 { font-size: 1.1rem; border-bottom: 1px solid #eee; padding-bottom: 0.3rem; }
+.monthly-content table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin: 0.5rem 0; }
+.monthly-content th, .monthly-content td { padding: 0.4rem 0.7rem; border-bottom: 1px solid #eee; text-align: left; }
+.monthly-content th { background: #f8f9fa; font-weight: 600; }
+.monthly-content code { font-family: monospace; background: #f4f4f4; padding: 0.1rem 0.3rem; border-radius: 3px; }
+.monthly-content ul { margin: 0.4rem 0; padding-left: 1.4rem; }
+.monthly-content li { margin: 0.2rem 0; font-size: 0.85rem; }
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script>
+(function() {
+  async function loadMonthlyReports() {
+    const resp = await fetch('/admin/api/monthly-reports');
+    if (!resp.ok) return;
+    const reports = await resp.json();
+    const container = document.getElementById('monthly-list');
+    if (!reports || reports.length === 0) {
+      container.innerHTML = '<p class="muted">暂无月度数据。</p>';
+      return;
+    }
+    container.innerHTML = '';
+    reports.forEach((r, idx) => {
+      const card = document.createElement('div');
+      card.className = 'monthly-card';
+      const recCredits = r.recommendation.recommended
+        ? `推荐 ${r.recommendation.recommended.model} (${r.recommendation.recommended.credits.toFixed(0)} cr)`
+        : '无可负担模型';
+      // First card (current month) open by default
+      const openAttr = idx === 0 ? 'open' : '';
+      card.innerHTML = `
+        <details ${openAttr}>
+          <summary>
+            <div class="monthly-summary-info">
+              <span class="month-range">${r.cycle_start} ~ ${r.cycle_end}</span>
+              <span class="month-status month-status-${r.status}">
+                ${r.status === 'in_progress' ? '⏳ 进行中' :
+                  r.status === 'complete' ? '✅ 已结束' : '⚠️ 部分数据'}
+              </span>
+              <span class="month-quick-stat">${r.totals.calls} 次调用</span>
+              <span class="month-quick-stat">${recCredits}</span>
+            </div>
+          </summary>
+          <div class="monthly-content">${marked.parse(r.markdown)}</div>
+        </details>
+      `;
+      container.appendChild(card);
+    });
+  }
+  // Expose globally so model change can refresh
+  window.loadMonthlyReports = loadMonthlyReports;
+  loadMonthlyReports();
 })();
 </script>
 
@@ -224,19 +422,36 @@
 
 <!-- Token usage panel ============================================== -->
 <article id="token-panel" style="margin-top:1.5rem">
-  <header style="display:flex; justify-content:space-between; align-items:center">
-    <div>
-      <strong>🪙 Token 用量监控</strong>
-      <small class="muted" style="margin-left:0.6rem">每小时自动刷新 · 数据来源 OpenClaw session 日志</small>
+  <header>
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem">
+      <div>
+        <strong>🪙 Token 用量监控</strong>
+        <small class="muted" style="margin-left:0.6rem">每小时自动刷新 · 数据源 OpenClaw session 日志</small>
+      </div>
+      <button id="refresh-btn" class="secondary outline" style="padding:0.3rem 0.7rem; font-size:0.8rem; margin:0; width:auto">🔄 手动刷新</button>
     </div>
-    <div style="display:flex; gap:0.6rem; align-items:center">
-      <label style="margin:0; font-size:0.85rem">模型：</label>
-      <select id="model-select" style="margin:0; padding:0.3rem 0.6rem; font-size:0.85rem; width:auto">
-        <option value="qwen3.6-flash">qwen3.6-flash</option>
-        <option value="qwen3.6-plus">qwen3.6-plus</option>
-      </select>
-      <button id="refresh-btn" class="secondary outline" style="padding:0.3rem 0.6rem; font-size:0.8rem; margin:0; width:auto">手动刷新</button>
+
+    <div class="model-selector">
+      <label class="model-selector-label">💰 价格模型</label>
+      <div class="model-btn-group">
+        <button type="button" class="model-btn active" data-model="qwen3.6-flash">
+          <span class="model-name">qwen3.6-flash</span>
+          <span class="model-tier">经济档</span>
+          <span class="model-price">1.2 / 7.2 元/M</span>
+        </button>
+        <button type="button" class="model-btn" data-model="qwen3.6-plus">
+          <span class="model-name">qwen3.6-plus</span>
+          <span class="model-tier">均衡档</span>
+          <span class="model-price">2.0 / 12 元/M</span>
+        </button>
+        <button type="button" class="model-btn" data-model="qwen3.7-max">
+          <span class="model-name">qwen3.7-max</span>
+          <span class="model-tier">旗舰档</span>
+          <span class="model-price">12 / 36 元/M（原价）</span>
+        </button>
+      </div>
     </div>
+    <input type="hidden" id="model-select" value="qwen3.6-flash">
   </header>
 
   <!-- Headline cards -->
@@ -390,8 +605,16 @@
   });
   document.querySelector('.period-btn[data-period="intraday"]').classList.remove('outline');
 
-  // Model selector
-  document.getElementById('model-select').addEventListener('change', loadData);
+  // Model selector (button group)
+  document.querySelectorAll('.model-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('.model-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.getElementById('model-select').value = btn.dataset.model;
+      loadData();
+      loadMonthlyReports();
+    });
+  });
 
   // Manual refresh
   document.getElementById('refresh-btn').addEventListener('click', async () => {
@@ -404,6 +627,179 @@
 
   // Initial load
   loadData();
+})();
+</script>
+
+
+<!-- Monthly Reports Archive ===================================== -->
+<article id="monthly-archive" style="margin-top:1.5rem">
+  <header>
+    <strong>📅 月度账单归档</strong>
+    <small class="muted" style="margin-left:0.6rem">按计费周期（每月 27 日）归档 · 默认折叠</small>
+  </header>
+  <div id="monthly-list" style="margin-top:0.8rem">
+    <p class="muted">加载中…</p>
+  </div>
+</article>
+
+<style>
+/* Model selector — prominent button group */
+.model-selector {
+  margin-top: 1rem;
+  padding: 0.8rem;
+  background: linear-gradient(135deg, #f8f9ff 0%, #fff 100%);
+  border: 1px solid #e0e3ed;
+  border-radius: 10px;
+}
+.model-selector-label {
+  display: block;
+  margin: 0 0 0.6rem;
+  font-weight: bold;
+  font-size: 0.9rem;
+  color: #555;
+}
+.model-btn-group {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 0.6rem;
+}
+.model-btn {
+  background: #fff;
+  border: 2px solid #e0e3ed;
+  border-radius: 8px;
+  padding: 0.7rem 0.8rem;
+  cursor: pointer;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin: 0;
+  width: 100%;
+  transition: all 0.15s;
+  color: #333;
+}
+.model-btn:hover {
+  border-color: #5b8dee;
+  background: #f4f8ff;
+}
+.model-btn.active {
+  border-color: #2962ff;
+  background: linear-gradient(135deg, #2962ff 0%, #1e88e5 100%);
+  color: #fff;
+  box-shadow: 0 3px 12px rgba(41,98,255,0.25);
+  transform: translateY(-1px);
+}
+.model-btn .model-name {
+  font-size: 0.95rem;
+  font-weight: bold;
+}
+.model-btn .model-tier {
+  font-size: 0.72rem;
+  opacity: 0.7;
+}
+.model-btn .model-price {
+  font-size: 0.72rem;
+  opacity: 0.85;
+  margin-top: 0.1rem;
+  font-family: monospace;
+}
+
+/* Monthly reports */
+.monthly-card {
+  border: 1px solid #e0e3ed;
+  border-radius: 8px;
+  margin-bottom: 0.6rem;
+  overflow: hidden;
+}
+.monthly-card details {
+  margin: 0;
+}
+.monthly-card summary {
+  padding: 0.7rem 1rem;
+  background: #f8f9fa;
+  cursor: pointer;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  list-style: none;
+}
+.monthly-card summary::-webkit-details-marker { display: none; }
+.monthly-card summary::after {
+  content: "▼";
+  font-size: 0.7rem;
+  color: #888;
+  transition: transform 0.2s;
+}
+.monthly-card details[open] summary::after { transform: rotate(180deg); }
+.monthly-card summary:hover { background: #f0f2f5; }
+.monthly-summary-info { display: flex; gap: 0.6rem; align-items: center; flex-wrap: wrap; }
+.month-range { font-weight: bold; }
+.month-status { font-size: 0.78rem; padding: 0.15rem 0.5rem; border-radius: 4px; }
+.month-status-in_progress { background: #fff3e0; color: #e65100; }
+.month-status-complete { background: #e8f5e9; color: #2e7d32; }
+.month-status-partial_data { background: #ffebee; color: #c62828; }
+.month-quick-stat { font-size: 0.82rem; color: #555; }
+.monthly-content {
+  padding: 1rem 1.2rem;
+  background: #fff;
+  border-top: 1px solid #f0f0f0;
+}
+.monthly-content h1, .monthly-content h2, .monthly-content h3 {
+  margin: 0.8rem 0 0.4rem;
+  font-size: 1rem;
+}
+.monthly-content h1 { font-size: 1.1rem; border-bottom: 1px solid #eee; padding-bottom: 0.3rem; }
+.monthly-content table { width: 100%; border-collapse: collapse; font-size: 0.85rem; margin: 0.5rem 0; }
+.monthly-content th, .monthly-content td { padding: 0.4rem 0.7rem; border-bottom: 1px solid #eee; text-align: left; }
+.monthly-content th { background: #f8f9fa; font-weight: 600; }
+.monthly-content code { font-family: monospace; background: #f4f4f4; padding: 0.1rem 0.3rem; border-radius: 3px; }
+.monthly-content ul { margin: 0.4rem 0; padding-left: 1.4rem; }
+.monthly-content li { margin: 0.2rem 0; font-size: 0.85rem; }
+</style>
+
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+<script>
+(function() {
+  async function loadMonthlyReports() {
+    const resp = await fetch('/admin/api/monthly-reports');
+    if (!resp.ok) return;
+    const reports = await resp.json();
+    const container = document.getElementById('monthly-list');
+    if (!reports || reports.length === 0) {
+      container.innerHTML = '<p class="muted">暂无月度数据。</p>';
+      return;
+    }
+    container.innerHTML = '';
+    reports.forEach((r, idx) => {
+      const card = document.createElement('div');
+      card.className = 'monthly-card';
+      const recCredits = r.recommendation.recommended
+        ? `推荐 ${r.recommendation.recommended.model} (${r.recommendation.recommended.credits.toFixed(0)} cr)`
+        : '无可负担模型';
+      // First card (current month) open by default
+      const openAttr = idx === 0 ? 'open' : '';
+      card.innerHTML = `
+        <details ${openAttr}>
+          <summary>
+            <div class="monthly-summary-info">
+              <span class="month-range">${r.cycle_start} ~ ${r.cycle_end}</span>
+              <span class="month-status month-status-${r.status}">
+                ${r.status === 'in_progress' ? '⏳ 进行中' :
+                  r.status === 'complete' ? '✅ 已结束' : '⚠️ 部分数据'}
+              </span>
+              <span class="month-quick-stat">${r.totals.calls} 次调用</span>
+              <span class="month-quick-stat">${recCredits}</span>
+            </div>
+          </summary>
+          <div class="monthly-content">${marked.parse(r.markdown)}</div>
+        </details>
+      `;
+      container.appendChild(card);
+    });
+  }
+  // Expose globally so model change can refresh
+  window.loadMonthlyReports = loadMonthlyReports;
+  loadMonthlyReports();
 })();
 </script>
 
