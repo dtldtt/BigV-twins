@@ -13,6 +13,7 @@ from fastapi import APIRouter, BackgroundTasks, Depends, Form, HTTPException, Re
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bigv_twins.config import BY_SLUG
@@ -27,6 +28,18 @@ router = APIRouter(prefix="/journal")
 
 PKG_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(PKG_DIR / "templates"))
+
+def _fromjson_filter(s):
+    if not s:
+        return {}
+    if isinstance(s, (dict, list)):
+        return s
+    try:
+        return json.loads(s)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+
+templates.env.filters['fromjson'] = _fromjson_filter
 
 
 class _FakeW:
@@ -50,8 +63,23 @@ def _collect_stock_snapshot(ticker: str) -> dict:
     }
 
 
-async def _collect_blogger_opinions(ticker: str) -> list[dict]:
+async def _collect_blogger_opinions(ticker: str, ticker_name: str = "") -> list[dict]:
+    """Match by ticker code OR name (mentioned_tickers stores codes, but legacy
+    journal entries may have Chinese name as the ticker field)."""
     fourteen_days_ago = (date.today() - timedelta(days=14)).strftime("%Y-%m-%d")
+    # Build the set of values that should trigger a match
+    match_set = {ticker}
+    if ticker_name:
+        match_set.add(ticker_name)
+    # Also resolve ticker → code if it's a Chinese name
+    try:
+        info = resolve_ticker(ticker)
+        if info:
+            match_set.add(info.code)
+            match_set.add(info.name)
+    except Exception:
+        pass
+
     async with db._SessionFactory() as session:
         rows = await session.execute(
             select(BloggerDailyBrief).where(
@@ -64,7 +92,7 @@ async def _collect_blogger_opinions(ticker: str) -> list[dict]:
                 mentioned = json.loads(br.mentioned_tickers or "[]")
             except json.JSONDecodeError:
                 continue
-            if ticker in mentioned:
+            if any(m in mentioned for m in match_set):
                 blogger = BY_SLUG.get(br.blogger_slug)
                 opinions.append({
                     "slug": br.blogger_slug,
@@ -88,7 +116,7 @@ async def _fill_snapshot(journal_id: int):
         except Exception as e:
             log.warning("stock snapshot failed for %s: %s", journal.ticker, e)
         try:
-            opinions = await _collect_blogger_opinions(journal.ticker)
+            opinions = await _collect_blogger_opinions(journal.ticker, journal.ticker_name or "")
             journal.blogger_opinions = json.dumps(opinions, ensure_ascii=False)
         except Exception as e:
             log.warning("blogger opinions failed for %s: %s", journal.ticker, e)
@@ -101,13 +129,17 @@ async def _fill_snapshot(journal_id: int):
             journal.market_snapshot = json.dumps(market_data, ensure_ascii=False)
         except Exception as e:
             log.warning("market snapshot failed: %s", e)
-        # Master wisdom: search master RAG DBs for related insights
+        # Master wisdom: search master RAG DBs (sync calls wrapped in executor)
         try:
             from bigv_twins.search import search as rag_search
+            loop = asyncio.get_running_loop()
             wisdom = []
             for master_slug in ("buffett", "munger", "graham", "lynch"):
                 try:
-                    hits = rag_search(master_slug, journal.ticker_name, top_k=2)
+                    hits = await loop.run_in_executor(
+                        None,
+                        lambda s=master_slug: rag_search(s, journal.ticker_name, top_k=2),
+                    )
                     for h in hits:
                         if h.distance < 1.0:
                             wisdom.append({
@@ -119,11 +151,9 @@ async def _fill_snapshot(journal_id: int):
                 except Exception:
                     pass
             if wisdom:
-                journal.market_snapshot = json.dumps(
-                    {**(json.loads(journal.market_snapshot) if journal.market_snapshot else {}),
-                     "__master_wisdom": wisdom[:4]},
-                    ensure_ascii=False,
-                )
+                existing = json.loads(journal.market_snapshot) if journal.market_snapshot else {}
+                existing["__master_wisdom"] = wisdom[:4]
+                journal.market_snapshot = json.dumps(existing, ensure_ascii=False)
         except Exception as e:
             log.warning("master wisdom search failed: %s", e)
 
@@ -152,8 +182,11 @@ async def _auto_add_watchlist(user_id: int, ticker: str, ticker_name: str):
         try:
             await session.commit()
             log.info("auto-added %s to watchlist for user %d", ticker, user_id)
-        except Exception:
-            pass  # duplicate or other constraint
+        except IntegrityError:
+            await session.rollback()  # duplicate (race condition)
+        except Exception as e:
+            await session.rollback()
+            log.warning("auto-add watchlist failed: %s", e)
 
 
 def _build_portfolio(journals: list, price_map: dict, quote_map: dict,
@@ -369,23 +402,22 @@ async def journal_create(
     expected_hold_period: str = Form(""),
     if_drop_10pct: str = Form(""),
 ):
-    # Resolve ticker: user can input just name OR just code
+    # Resolve ticker: ALWAYS normalize to code. ticker_name only stores the name.
     raw_ticker = ticker.strip()
     raw_name = ticker_name.strip()
-    if raw_ticker and not raw_name:
+    # Try to resolve from either input
+    info = None
+    if raw_ticker:
         info = resolve_ticker(raw_ticker)
-        if info:
-            raw_ticker = info.code
-            raw_name = info.name
-    elif raw_name and not raw_ticker:
+    if not info and raw_name:
         info = resolve_ticker(raw_name)
-        if info:
-            raw_ticker = info.code
-            raw_name = info.name
-    elif raw_ticker:
-        info = resolve_ticker(raw_ticker)
-        if info and raw_name == raw_ticker:
-            raw_name = info.name
+    if info:
+        # Always use the resolved code as ticker, resolved name as ticker_name
+        raw_ticker = info.code
+        raw_name = info.name
+    # Fallback: if resolve failed, keep what user typed (don't lose data)
+    if not raw_name:
+        raw_name = raw_ticker
 
     journal = DecisionJournal(
         user_id=user.id,

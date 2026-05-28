@@ -59,6 +59,7 @@
             <div class="watch-name">
               <strong>{{ q.name }}</strong>
               <code class="watch-ticker">{{ q.ticker }}</code>
+              {% if q.has_journal %}<a href="/journal?ticker={{ q.ticker }}" title="有活跃的投资记录" style="text-decoration:none; font-size:0.85rem">📝</a>{% endif %}
               <small class="muted">{{ q.market }}</small>
             </div>
             <div class="watch-price">

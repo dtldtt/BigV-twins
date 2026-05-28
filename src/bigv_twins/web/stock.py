@@ -45,6 +45,40 @@ class _FakeWatchlistItem:
         self.id = 0
 
 
+
+def _fetch_roe_approx(ticker: str) -> dict:
+    """Estimate ROE from latest annual report's EPS / BPS.
+
+    Uses akshare stock_fhps_detail_em which has both fields per fiscal year.
+    Returns {} on any failure. Slow (~2s) so call from async via to_thread.
+    """
+    try:
+        import akshare as ak
+        df = ak.stock_fhps_detail_em(symbol=ticker)
+        if df is None or df.empty:
+            return {}
+        # Most recent annual report (报告期 ending in 12-31)
+        annual = df[df["报告期"].astype(str).str.endswith("12-31")].sort_values("报告期", ascending=False)
+        if annual.empty:
+            return {}
+        row = annual.iloc[0]
+        eps = float(row.get("每股收益") or 0)
+        bps = float(row.get("每股净资产") or 0)
+        if bps <= 0:
+            return {}
+        roe_pct = (eps / bps) * 100
+        return {
+            "roe_pct": round(roe_pct, 2),
+            "eps": round(eps, 3),
+            "bps": round(bps, 3),
+            "report_period": str(row.get("报告期", "")),
+            "div_yield_pct": float(row.get("现金分红-股息率") or 0) or None,
+        }
+    except Exception as e:
+        log.warning("ROE fetch failed for %s: %s", ticker, e)
+        return {}
+
+
 @router.get("/{ticker}", response_class=HTMLResponse)
 async def stock_page(
     request: Request,
@@ -53,7 +87,6 @@ async def stock_page(
     session: Annotated[AsyncSession, Depends(db.get_session)],
 ):
     """个股研究聚合页。"""
-    log.info("=== stock_page ENTERED ticker=%s user_id=%s ===", ticker, user.id)
     import asyncio
 
     # If ticker is a Chinese name (not a code), resolve and redirect to code URL
@@ -135,7 +168,6 @@ async def stock_page(
         ).order_by(DecisionJournal.created_at.desc()).limit(10)
     )
     _raw_entries = list(journal_rows.scalars())
-    log.info("stock page ticker=%s user=%s journal_entries=%d", ticker, user.id, len(_raw_entries))
     # Eagerly extract attributes to avoid lazy-load issues after session closes
     journal_entries = []
     for j in _raw_entries:
@@ -150,6 +182,14 @@ async def stock_page(
             "target_price": j.target_price,
             "stop_loss_price": j.stop_loss_price,
         })
+
+    # Fetch ROE asynchronously (only A-share stocks, not ETF, not HK)
+    roe = {}
+    if ticker.isdigit() and len(ticker) == 6 and not _is_etf(ticker):
+        try:
+            roe = await asyncio.to_thread(_fetch_roe_approx, ticker)
+        except Exception:
+            pass
 
     # Determine ticker type for conditional display
     is_etf = _is_etf(ticker)
@@ -172,5 +212,6 @@ async def stock_page(
             "backtests": backtests,
             "journal_entries": journal_entries,
             "ticker_type": ticker_type,
+            "roe": roe,
         },
     )

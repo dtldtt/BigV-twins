@@ -81,7 +81,18 @@ async def report_index(
     briefs = await get_latest_briefs()
     # P5: attach per-ticker daily brief (cross-ref blogger mentions + news verdict)
     ticker_briefs = await get_briefs_for_tickers([w.ticker for w in watchlist])
+    # Find which tickers have an active decision journal for this user (Phase 1B mark)
+    from .db import DecisionJournal
+    journal_rows = await session.execute(
+        select(DecisionJournal.ticker).where(
+            DecisionJournal.user_id == user.id,
+            DecisionJournal.status == "active",
+        ).distinct()
+    )
+    active_journal_tickers = {row[0] for row in journal_rows.all()}
+
     for q in watchlist_quotes:
+        q["has_journal"] = q["ticker"] in active_journal_tickers
         tb = ticker_briefs.get(q["ticker"])
         if tb:
             try:

@@ -42,6 +42,71 @@
     if (html !== null) el.innerHTML = html;
   });
 
+  // ---- reconnect to in-flight LLM response ------------------
+  // If the last message is from the user (no assistant reply yet), there might
+  // be a background LLM task still running. Try to connect to its stream.
+  async function tryReconnectStream(cid, messagesEl) {
+    if (!messagesEl) return;
+    const bubbles = messagesEl.querySelectorAll(".chat-bubble");
+    if (bubbles.length === 0) return;
+    const last = bubbles[bubbles.length - 1];
+    if (!last.classList.contains("user")) return;  // already has assistant reply
+
+    // Append placeholder
+    const assistantEl = document.createElement("div");
+    assistantEl.className = "chat-bubble assistant";
+    assistantEl.textContent = "🔍 检索中…（重新连接到后台任务）";
+    messagesEl.appendChild(assistantEl);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+
+    let buf = "";
+    let firstDelta = true;
+    try {
+      const resp = await fetch(`/chat/${cid}/stream`);
+      if (!resp.ok) {
+        assistantEl.remove();
+        return;
+      }
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      let leftover = "";
+      while (true) {
+        const {done, value} = await reader.read();
+        if (done) break;
+        leftover += decoder.decode(value, {stream: true});
+        const events = leftover.split("\n\n");
+        leftover = events.pop() || "";
+        for (const ev of events) {
+          for (const line of ev.split("\n")) {
+            if (!line.startsWith("data:")) continue;
+            const payload = line.slice(5).trim();
+            if (payload === "[DONE]") continue;
+            try {
+              const obj = JSON.parse(payload);
+              if (obj.delta) {
+                if (firstDelta) { assistantEl.textContent = ""; firstDelta = false; }
+                buf += obj.delta;
+                const html = renderMarkdown(buf);
+                if (html !== null) assistantEl.innerHTML = html;
+                else assistantEl.textContent = buf;
+                messagesEl.scrollTop = messagesEl.scrollHeight;
+              } else if (obj.error) {
+                assistantEl.textContent = `⚠ ${obj.error}`;
+              }
+            } catch (e) { /* ignore */ }
+          }
+        }
+      }
+      if (!buf) {
+        // No in-flight task and no saved msg — remove placeholder
+        assistantEl.remove();
+      }
+    } catch (err) {
+      console.warn("reconnect failed:", err);
+      assistantEl.remove();
+    }
+  }
+
   // ---- chat form ---------------------------------------------
 
   const form = document.getElementById("ask-form");
@@ -163,4 +228,7 @@
   });
 
   scrollDown();
+
+  // On page load, check for in-flight response
+  tryReconnectStream(cid, messagesEl);
 })();

@@ -411,6 +411,131 @@ async def delete_conversation(
     return RedirectResponse(f"/chat/{slug}", status_code=303)
 
 
+# ============================================================================
+# In-flight chat state — survives client disconnect
+# ============================================================================
+# Per-conversation dict tracking the active background LLM task.
+# Cleaned up 60s after task completion to allow late reconnects.
+_INFLIGHT: dict[int, dict] = {}
+
+
+async def _run_chat_background(cid: int, messages: list, target_model: str):
+    """Background task: stream LLM, accumulate to buf, save to DB.
+
+    Runs independently of the HTTP request — client disconnect does NOT cancel.
+    SSE handlers subscribe to state["queue"] for live deltas.
+    """
+    state = _INFLIGHT[cid]
+    buf = state["buf"]
+    queue = state["queue"]
+    try:
+        async for delta in openclaw_client.stream_chat(messages, model=target_model):
+            buf.append(delta)
+            # Push to all current subscribers (non-blocking)
+            try:
+                queue.put_nowait(("delta", delta))
+            except asyncio.QueueFull:
+                pass  # subscriber too slow; they'll get the full buf on next poll
+    except Exception as exc:
+        log.exception("background LLM failed for cid=%s", cid)
+        state["error"] = str(exc)
+        try:
+            queue.put_nowait(("error", str(exc)))
+        except asyncio.QueueFull:
+            pass
+    finally:
+        state["done"].set()
+        try:
+            queue.put_nowait(("done", None))
+        except asyncio.QueueFull:
+            pass
+        # Persist full reply to DB (independent of client)
+        full = "".join(buf).strip()
+        if full:
+            try:
+                async with db._SessionFactory() as s:
+                    s.add(Message(conversation_id=cid, role="assistant", content=full))
+                    conv = await s.get(Conversation, cid)
+                    if conv is not None:
+                        conv.updated_at = datetime.now(timezone.utc)
+                    await s.commit()
+                log.info("persisted assistant msg for cid=%s (%d chars)", cid, len(full))
+            except Exception:
+                log.exception("DB save failed for cid=%s", cid)
+        # Keep state alive for 60s so late reconnects can get the full reply
+        await asyncio.sleep(60)
+        _INFLIGHT.pop(cid, None)
+
+
+async def _stream_from_inflight(cid: int):
+    """SSE generator: subscribe to an active background task's stream.
+
+    Replays any already-accumulated buffer first, then follows new deltas.
+    """
+    state = _INFLIGHT.get(cid)
+    if not state:
+        yield "data: [DONE]\n\n"
+        return
+
+    # Replay buffer (for reconnect after disconnect)
+    if state["buf"]:
+        joined = "".join(state["buf"])
+        yield f"data: {json.dumps({'delta': joined}, ensure_ascii=False)}\n\n"
+
+    # If already done, finish
+    if state["done"].is_set():
+        if state.get("error"):
+            yield f"data: {json.dumps({'error': state['error']}, ensure_ascii=False)}\n\n"
+        yield "data: [DONE]\n\n"
+        return
+
+    # Subscribe to new deltas via the queue. Each SSE handler creates its own
+    # cursor by tracking the buf length it has already seen.
+    last_idx = len(state["buf"])
+    while not state["done"].is_set():
+        # Wait a bit for new chunks; if buf grew, emit the new portion
+        await asyncio.sleep(0.1)
+        if len(state["buf"]) > last_idx:
+            new_chunks = state["buf"][last_idx:]
+            last_idx = len(state["buf"])
+            joined = "".join(new_chunks)
+            yield f"data: {json.dumps({'delta': joined}, ensure_ascii=False)}\n\n"
+        if state.get("error"):
+            yield f"data: {json.dumps({'error': state['error']}, ensure_ascii=False)}\n\n"
+            break
+
+    # Final flush: anything that arrived between last check and done
+    if len(state["buf"]) > last_idx:
+        new_chunks = state["buf"][last_idx:]
+        joined = "".join(new_chunks)
+        yield f"data: {json.dumps({'delta': joined}, ensure_ascii=False)}\n\n"
+
+    yield "data: [DONE]\n\n"
+
+
+@router.get("/{cid}/stream")
+async def chat_stream_reconnect(
+    cid: int,
+    user: Annotated[User, Depends(auth.require_user)],
+):
+    """Reconnect to an in-flight LLM response.
+
+    Used when user navigates away during a response then comes back.
+    Frontend calls this on page load if last user msg has no assistant reply yet.
+    """
+    # Verify ownership
+    async with db._SessionFactory() as session:
+        conv = await session.get(Conversation, cid)
+        if conv is None or conv.user_id != user.id:
+            return Response(status_code=404, content="conversation not found")
+
+    return StreamingResponse(
+        _stream_from_inflight(cid),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @router.post("/{cid}/ask")
 async def ask(
     request: Request,
@@ -475,35 +600,19 @@ async def ask(
         conv.updated_at = datetime.now(timezone.utc)
         await session.commit()
 
-    async def gen():
-        buf: list[str] = []
-        try:
-            try:
-                async for delta in openclaw_client.stream_chat(messages, model=target_model):
-                    buf.append(delta)
-                    yield f"data: {json.dumps({'delta': delta}, ensure_ascii=False)}\n\n"
-            except Exception as exc:
-                log.exception("stream_chat failed for cid=%s", cid)
-                yield (
-                    f"data: {json.dumps({'error': str(exc)}, ensure_ascii=False)}\n\n"
-                )
-            yield "data: [DONE]\n\n"
-        finally:
-            # Persist whatever we received even if the client disconnected mid-stream.
-            full = "".join(buf).strip()
-            if full:
-                try:
-                    async with db._SessionFactory() as s2:
-                        s2.add(Message(conversation_id=cid, role="assistant", content=full))
-                        conv2 = await s2.get(Conversation, cid)
-                        if conv2 is not None:
-                            conv2.updated_at = datetime.now(timezone.utc)
-                        await s2.commit()
-                except Exception:
-                    log.exception("failed to persist assistant msg for cid=%s", cid)
+    # Spawn LLM as a detached background task — survives client disconnect.
+    # If there's already an in-flight task for this cid (rare race), don't start another.
+    if cid not in _INFLIGHT:
+        _INFLIGHT[cid] = {
+            "buf": [],
+            "queue": asyncio.Queue(maxsize=2000),
+            "done": asyncio.Event(),
+            "error": None,
+        }
+        asyncio.create_task(_run_chat_background(cid, messages, target_model))
 
     return StreamingResponse(
-        gen(),
+        _stream_from_inflight(cid),
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )

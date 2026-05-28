@@ -33,6 +33,8 @@
   {% if quote.pe %}<div class="fund-item"><span class="fund-label">PE(TTM)</span><span class="fund-value">{{ "%.1f"|format(quote.pe) }}</span></div>{% endif %}
   {% if quote.pb %}<div class="fund-item"><span class="fund-label">PB</span><span class="fund-value">{{ "%.2f"|format(quote.pb) }}</span></div>{% endif %}
   {% if quote.market_cap %}<div class="fund-item"><span class="fund-label">总市值</span><span class="fund-value">{{ "%.0f"|format(quote.market_cap) }}亿</span></div>{% endif %}
+  {% if roe.roe_pct %}<div class="fund-item"><span class="fund-label">ROE({{ roe.report_period[:4] }})</span><span class="fund-value">{{ "%.1f"|format(roe.roe_pct) }}%</span></div>{% endif %}
+  {% if roe.div_yield_pct %}<div class="fund-item"><span class="fund-label">股息率</span><span class="fund-value">{{ "%.2f"|format(roe.div_yield_pct) }}%</span></div>{% endif %}
 </div>
 {% endif %}
 

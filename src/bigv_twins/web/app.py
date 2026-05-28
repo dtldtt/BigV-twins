@@ -41,6 +41,20 @@ from .ticker_brief import generate_ticker_briefs_for_day
 PKG_DIR = Path(__file__).resolve().parent
 TEMPLATES = Jinja2Templates(directory=str(PKG_DIR / "templates"))
 
+def _fromjson_filter(s):
+    """Jinja2 filter: parse JSON string. Returns {} on error."""
+    if not s:
+        return {}
+    if isinstance(s, (dict, list)):
+        return s
+    import json as _json
+    try:
+        return _json.loads(s)
+    except (TypeError, ValueError, _json.JSONDecodeError):
+        return {}
+
+TEMPLATES.env.filters['fromjson'] = _fromjson_filter
+
 
 async def _refresh_jin10_and_index() -> None:
     """jin10 拉新 + 增量重建搜索索引（FTS）。"""
