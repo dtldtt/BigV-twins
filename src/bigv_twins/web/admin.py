@@ -58,6 +58,27 @@ async def dashboard(
     )
 
 
+
+
+@router.get("/api/token-usage")
+async def token_usage_api(
+    admin_user: Annotated[User, Depends(auth.require_admin)],
+    model: str = "qwen3.6-flash",
+):
+    """Return aggregated token usage stats for charts."""
+    from .token_usage import get_dashboard_stats
+    return await get_dashboard_stats(model=model)
+
+
+@router.post("/api/token-usage/refresh")
+async def token_usage_refresh_now(
+    admin_user: Annotated[User, Depends(auth.require_admin)],
+):
+    """Manual trigger to refresh token usage from session files."""
+    from .token_usage import refresh_token_usage
+    result = await refresh_token_usage()
+    return result
+
 # ------------------------------------------------------------ invites
 
 @router.get("/invites", response_class=HTMLResponse)

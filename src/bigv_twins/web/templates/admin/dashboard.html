@@ -1,5 +1,190 @@
 {% extends "base.html" %}
-{% block title %}管理 · 赛博大V{% endblock %}
+{% block title %}管理 · 赛博大V<!-- Token usage panel ============================================== -->
+<article id="token-panel" style="margin-top:1.5rem">
+  <header style="display:flex; justify-content:space-between; align-items:center">
+    <div>
+      <strong>🪙 Token 用量监控</strong>
+      <small class="muted" style="margin-left:0.6rem">每小时自动刷新 · 数据来源 OpenClaw session 日志</small>
+    </div>
+    <div style="display:flex; gap:0.6rem; align-items:center">
+      <label style="margin:0; font-size:0.85rem">模型：</label>
+      <select id="model-select" style="margin:0; padding:0.3rem 0.6rem; font-size:0.85rem; width:auto">
+        <option value="qwen3.6-flash">qwen3.6-flash</option>
+        <option value="qwen3.6-plus">qwen3.6-plus</option>
+      </select>
+      <button id="refresh-btn" class="secondary outline" style="padding:0.3rem 0.6rem; font-size:0.8rem; margin:0; width:auto">手动刷新</button>
+    </div>
+  </header>
+
+  <!-- Headline cards -->
+  <div class="grid" style="margin-top:0.8rem">
+    <article style="background:#e8f5e9; border-left:3px solid #4caf50">
+      <header style="font-size:0.85rem; color:#2e7d32">今日</header>
+      <div style="font-size:0.78rem; color:#666">调用 <strong id="today-calls">—</strong> 次</div>
+      <div style="font-size:0.78rem; color:#666">输入 <strong id="today-input">—</strong> · 输出 <strong id="today-output">—</strong></div>
+      <h3 style="margin:0.3rem 0 0; color:#2e7d32"><span id="today-credits">—</span> credits</h3>
+    </article>
+
+    <article style="background:#fff3e0; border-left:3px solid #ff9800">
+      <header style="font-size:0.85rem; color:#e65100">本月（<span id="month-range">—</span>）</header>
+      <div style="font-size:0.78rem; color:#666">调用 <strong id="month-calls">—</strong> 次</div>
+      <div style="font-size:0.78rem; color:#666">输入 <strong id="month-input">—</strong> · 输出 <strong id="month-output">—</strong></div>
+      <h3 style="margin:0.3rem 0 0; color:#e65100"><span id="month-credits">—</span> credits</h3>
+    </article>
+  </div>
+
+  <!-- Chart -->
+  <div style="margin-top:1.2rem; border-top:1px solid #eee; padding-top:0.8rem">
+    <div style="display:flex; gap:0.4rem; margin-bottom:0.6rem">
+      <button class="period-btn" data-period="intraday">今日 24h</button>
+      <button class="period-btn" data-period="daily">近 30 天</button>
+      <button class="period-btn" data-period="monthly">近 6 月</button>
+    </div>
+    <div style="position:relative; height:280px">
+      <canvas id="token-chart"></canvas>
+    </div>
+  </div>
+</article>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+(function() {
+  let chart = null;
+  let dataCache = null;
+  let currentPeriod = 'intraday';
+
+  function fmtInt(n) {
+    if (n >= 1e9) return (n/1e9).toFixed(2) + 'B';
+    if (n >= 1e6) return (n/1e6).toFixed(2) + 'M';
+    if (n >= 1e3) return (n/1e3).toFixed(1) + 'K';
+    return String(n);
+  }
+
+  async function loadData() {
+    const model = document.getElementById('model-select').value;
+    const resp = await fetch(`/admin/api/token-usage?model=${model}`);
+    if (!resp.ok) { console.error('failed:', resp.status); return; }
+    dataCache = await resp.json();
+    renderHeadlines();
+    renderChart(currentPeriod);
+  }
+
+  function renderHeadlines() {
+    if (!dataCache) return;
+    const t = dataCache.today, m = dataCache.this_month;
+    document.getElementById('today-calls').textContent = t.calls;
+    document.getElementById('today-input').textContent = fmtInt(t.input);
+    document.getElementById('today-output').textContent = fmtInt(t.output);
+    document.getElementById('today-credits').textContent = t.credits.toFixed(1);
+    document.getElementById('month-calls').textContent = m.calls;
+    document.getElementById('month-input').textContent = fmtInt(m.input);
+    document.getElementById('month-output').textContent = fmtInt(m.output);
+    document.getElementById('month-credits').textContent = m.credits.toFixed(1);
+    document.getElementById('month-range').textContent = m.range;
+  }
+
+  function renderChart(period) {
+    if (!dataCache) return;
+    const series = dataCache[period];
+    const labels = series.map(s => s.label);
+    const credits = series.map(s => s.credits);
+    const calls = series.map(s => s.calls);
+
+    if (chart) chart.destroy();
+    const ctx = document.getElementById('token-chart').getContext('2d');
+    chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            label: 'Credits',
+            data: credits,
+            borderColor: '#4caf50',
+            backgroundColor: 'rgba(76, 175, 80, 0.15)',
+            fill: true,
+            tension: 0.3,
+            yAxisID: 'y',
+            pointRadius: 3,
+          },
+          {
+            label: 'LLM 调用次数',
+            data: calls,
+            borderColor: '#ff9800',
+            backgroundColor: 'rgba(255, 152, 0, 0.05)',
+            borderDash: [5, 5],
+            tension: 0.3,
+            yAxisID: 'y1',
+            pointRadius: 2,
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: {mode: 'index', intersect: false},
+        scales: {
+          y: {
+            type: 'linear', position: 'left',
+            title: {display: true, text: 'Credits'},
+            beginAtZero: true,
+          },
+          y1: {
+            type: 'linear', position: 'right',
+            title: {display: true, text: '调用次数'},
+            beginAtZero: true,
+            grid: {drawOnChartArea: false},
+          },
+        },
+        plugins: {
+          legend: {position: 'top'},
+          tooltip: {
+            callbacks: {
+              afterTitle: (items) => {
+                const idx = items[0].dataIndex;
+                const s = series[idx];
+                return `输入: ${fmtInt(s.input)} | 输出: ${fmtInt(s.output)}`;
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  // Period buttons
+  document.querySelectorAll('.period-btn').forEach(btn => {
+    btn.classList.add('secondary', 'outline');
+    btn.style.cssText = 'padding:0.3rem 0.8rem; font-size:0.82rem; margin:0; width:auto';
+    btn.addEventListener('click', () => {
+      currentPeriod = btn.dataset.period;
+      document.querySelectorAll('.period-btn').forEach(b => {
+        b.classList.add('outline');
+      });
+      btn.classList.remove('outline');
+      renderChart(currentPeriod);
+    });
+  });
+  document.querySelector('.period-btn[data-period="intraday"]').classList.remove('outline');
+
+  // Model selector
+  document.getElementById('model-select').addEventListener('change', loadData);
+
+  // Manual refresh
+  document.getElementById('refresh-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('refresh-btn');
+    btn.disabled = true; btn.textContent = '刷新中…';
+    await fetch('/admin/api/token-usage/refresh', {method: 'POST'});
+    await loadData();
+    btn.disabled = false; btn.textContent = '手动刷新';
+  });
+
+  // Initial load
+  loadData();
+})();
+</script>
+
+{% endblock %}
 
 {% block content %}
 <nav>
@@ -23,25 +208,203 @@
 
 <div class="grid">
   <article>
-    <header>Token 用量（累计）</header>
-    <p>输入 <strong>{{ tok_in }}</strong> · 输出 <strong>{{ tok_out }}</strong></p>
-    <p class="muted"><small>注：当前 OpenClaw chat-completions 响应未带 usage，所以这里通常是 0。下一版若开 usage 字段会自动统计。</small></p>
-  </article>
-  <article>
     <header>博主可见性</header>
     <p>共 <strong>{{ blogger_total }}</strong> 位，已隐藏 <strong>{{ hidden_count }}</strong> 位</p>
     <a href="/admin/bloggers" role="button" class="outline">管理</a>
   </article>
+  <article>
+    <header>邀请码</header>
+    {% if active_invite %}
+    <p style="font-family:monospace;font-size:0.85rem;word-break:break-all">{{ active_invite.code[:20] }}…</p>
+    {% endif %}
+    <a href="/admin/invites" role="button" class="outline">查看 / 轮换</a>
+  </article>
 </div>
 
-<article>
-  <header>当前邀请码</header>
-  {% if active_invite %}
-    <p style="font-family:monospace;word-break:break-all">{{ active_invite.code }}</p>
-    <p class="muted"><small>生成于 {{ active_invite.created_at.strftime("%Y-%m-%d %H:%M") }}</small></p>
-  {% else %}
-    <p class="muted">（暂无可用邀请码）</p>
-  {% endif %}
-  <a href="/admin/invites" role="button">查看 / 轮换</a>
+
+<!-- Token usage panel ============================================== -->
+<article id="token-panel" style="margin-top:1.5rem">
+  <header style="display:flex; justify-content:space-between; align-items:center">
+    <div>
+      <strong>🪙 Token 用量监控</strong>
+      <small class="muted" style="margin-left:0.6rem">每小时自动刷新 · 数据来源 OpenClaw session 日志</small>
+    </div>
+    <div style="display:flex; gap:0.6rem; align-items:center">
+      <label style="margin:0; font-size:0.85rem">模型：</label>
+      <select id="model-select" style="margin:0; padding:0.3rem 0.6rem; font-size:0.85rem; width:auto">
+        <option value="qwen3.6-flash">qwen3.6-flash</option>
+        <option value="qwen3.6-plus">qwen3.6-plus</option>
+      </select>
+      <button id="refresh-btn" class="secondary outline" style="padding:0.3rem 0.6rem; font-size:0.8rem; margin:0; width:auto">手动刷新</button>
+    </div>
+  </header>
+
+  <!-- Headline cards -->
+  <div class="grid" style="margin-top:0.8rem">
+    <article style="background:#e8f5e9; border-left:3px solid #4caf50">
+      <header style="font-size:0.85rem; color:#2e7d32">今日</header>
+      <div style="font-size:0.78rem; color:#666">调用 <strong id="today-calls">—</strong> 次</div>
+      <div style="font-size:0.78rem; color:#666">输入 <strong id="today-input">—</strong> · 输出 <strong id="today-output">—</strong></div>
+      <h3 style="margin:0.3rem 0 0; color:#2e7d32"><span id="today-credits">—</span> credits</h3>
+    </article>
+
+    <article style="background:#fff3e0; border-left:3px solid #ff9800">
+      <header style="font-size:0.85rem; color:#e65100">本月（<span id="month-range">—</span>）</header>
+      <div style="font-size:0.78rem; color:#666">调用 <strong id="month-calls">—</strong> 次</div>
+      <div style="font-size:0.78rem; color:#666">输入 <strong id="month-input">—</strong> · 输出 <strong id="month-output">—</strong></div>
+      <h3 style="margin:0.3rem 0 0; color:#e65100"><span id="month-credits">—</span> credits</h3>
+    </article>
+  </div>
+
+  <!-- Chart -->
+  <div style="margin-top:1.2rem; border-top:1px solid #eee; padding-top:0.8rem">
+    <div style="display:flex; gap:0.4rem; margin-bottom:0.6rem">
+      <button class="period-btn" data-period="intraday">今日 24h</button>
+      <button class="period-btn" data-period="daily">近 30 天</button>
+      <button class="period-btn" data-period="monthly">近 6 月</button>
+    </div>
+    <div style="position:relative; height:280px">
+      <canvas id="token-chart"></canvas>
+    </div>
+  </div>
 </article>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script>
+(function() {
+  let chart = null;
+  let dataCache = null;
+  let currentPeriod = 'intraday';
+
+  function fmtInt(n) {
+    if (n >= 1e9) return (n/1e9).toFixed(2) + 'B';
+    if (n >= 1e6) return (n/1e6).toFixed(2) + 'M';
+    if (n >= 1e3) return (n/1e3).toFixed(1) + 'K';
+    return String(n);
+  }
+
+  async function loadData() {
+    const model = document.getElementById('model-select').value;
+    const resp = await fetch(`/admin/api/token-usage?model=${model}`);
+    if (!resp.ok) { console.error('failed:', resp.status); return; }
+    dataCache = await resp.json();
+    renderHeadlines();
+    renderChart(currentPeriod);
+  }
+
+  function renderHeadlines() {
+    if (!dataCache) return;
+    const t = dataCache.today, m = dataCache.this_month;
+    document.getElementById('today-calls').textContent = t.calls;
+    document.getElementById('today-input').textContent = fmtInt(t.input);
+    document.getElementById('today-output').textContent = fmtInt(t.output);
+    document.getElementById('today-credits').textContent = t.credits.toFixed(1);
+    document.getElementById('month-calls').textContent = m.calls;
+    document.getElementById('month-input').textContent = fmtInt(m.input);
+    document.getElementById('month-output').textContent = fmtInt(m.output);
+    document.getElementById('month-credits').textContent = m.credits.toFixed(1);
+    document.getElementById('month-range').textContent = m.range;
+  }
+
+  function renderChart(period) {
+    if (!dataCache) return;
+    const series = dataCache[period];
+    const labels = series.map(s => s.label);
+    const credits = series.map(s => s.credits);
+    const calls = series.map(s => s.calls);
+
+    if (chart) chart.destroy();
+    const ctx = document.getElementById('token-chart').getContext('2d');
+    chart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: labels,
+        datasets: [
+          {
+            label: 'Credits',
+            data: credits,
+            borderColor: '#4caf50',
+            backgroundColor: 'rgba(76, 175, 80, 0.15)',
+            fill: true,
+            tension: 0.3,
+            yAxisID: 'y',
+            pointRadius: 3,
+          },
+          {
+            label: 'LLM 调用次数',
+            data: calls,
+            borderColor: '#ff9800',
+            backgroundColor: 'rgba(255, 152, 0, 0.05)',
+            borderDash: [5, 5],
+            tension: 0.3,
+            yAxisID: 'y1',
+            pointRadius: 2,
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: {mode: 'index', intersect: false},
+        scales: {
+          y: {
+            type: 'linear', position: 'left',
+            title: {display: true, text: 'Credits'},
+            beginAtZero: true,
+          },
+          y1: {
+            type: 'linear', position: 'right',
+            title: {display: true, text: '调用次数'},
+            beginAtZero: true,
+            grid: {drawOnChartArea: false},
+          },
+        },
+        plugins: {
+          legend: {position: 'top'},
+          tooltip: {
+            callbacks: {
+              afterTitle: (items) => {
+                const idx = items[0].dataIndex;
+                const s = series[idx];
+                return `输入: ${fmtInt(s.input)} | 输出: ${fmtInt(s.output)}`;
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  // Period buttons
+  document.querySelectorAll('.period-btn').forEach(btn => {
+    btn.classList.add('secondary', 'outline');
+    btn.style.cssText = 'padding:0.3rem 0.8rem; font-size:0.82rem; margin:0; width:auto';
+    btn.addEventListener('click', () => {
+      currentPeriod = btn.dataset.period;
+      document.querySelectorAll('.period-btn').forEach(b => {
+        b.classList.add('outline');
+      });
+      btn.classList.remove('outline');
+      renderChart(currentPeriod);
+    });
+  });
+  document.querySelector('.period-btn[data-period="intraday"]').classList.remove('outline');
+
+  // Model selector
+  document.getElementById('model-select').addEventListener('change', loadData);
+
+  // Manual refresh
+  document.getElementById('refresh-btn').addEventListener('click', async () => {
+    const btn = document.getElementById('refresh-btn');
+    btn.disabled = true; btn.textContent = '刷新中…';
+    await fetch('/admin/api/token-usage/refresh', {method: 'POST'});
+    await loadData();
+    btn.disabled = false; btn.textContent = '手动刷新';
+  });
+
+  // Initial load
+  loadData();
+})();
+</script>
+
 {% endblock %}

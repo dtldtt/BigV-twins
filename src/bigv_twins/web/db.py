@@ -427,6 +427,21 @@ class InvestmentNote(Base):
 
     user: Mapped[User] = relationship()
 
+
+
+class TokenUsageHourly(Base):
+    """每小时 token 用量汇总（从 OpenClaw session JSONL 扫描得到）."""
+    __tablename__ = "token_usage_hourly"
+    hour: Mapped[str] = mapped_column(String(13), primary_key=True)  # YYYY-MM-DDTHH
+    total_calls: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_input: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_output: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_cache_read: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_cache_create: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    by_agent_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    by_model_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now, nullable=False)
+
 async def init_db() -> None:
     """Create tables if missing. Idempotent; called at app startup.
 

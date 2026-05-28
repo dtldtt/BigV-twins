@@ -35,6 +35,7 @@ from .stock import router as stock_router
 from .consensus import router as consensus_router
 from .timeline import router as timeline_router
 from .review_engine import run_scheduled_reviews
+from .token_usage import refresh_token_usage
 from .ticker_brief import generate_ticker_briefs_for_day
 
 
@@ -113,6 +114,12 @@ async def lifespan(app: FastAPI):
     # Decision review — daily at 20:00
     scheduler.add_job(run_scheduled_reviews, CronTrigger(hour=20, minute=0),
                       id="decision_review", misfire_grace_time=1800, replace_existing=True)
+
+    # Token usage tracker — hourly (no LLM, just scan jsonl)
+    scheduler.add_job(refresh_token_usage, IntervalTrigger(hours=1),
+                      id="token_usage_refresh", misfire_grace_time=600, replace_existing=True)
+    scheduler.add_job(refresh_token_usage, "date", id="token_usage_initial",
+                      replace_existing=True)
 
     scheduler.start()
     app.state.scheduler = scheduler
