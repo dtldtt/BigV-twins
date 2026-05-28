@@ -804,11 +804,24 @@ def get_dividend_history(query: str, *, last_n: int = 10) -> dict:
         return {"ok": False, "query": query, "error": f"无法识别股票：{query!r}"}
     if info.market == "hk":
         return _get_dividend_history_hk(query, info, last_n)
+    if info.market == "a-share" and info.board == "etf":
+        # ETF: route to dedicated frequency-aware handler
+        from .etf_dividend import get_etf_dividend_yield
+        # Get current price first
+        cp = None
+        try:
+            tc = _tencent_fetch(info.tencent_symbol)
+            cp = tc.get("current")
+            if cp and cp > 0:
+                cp = float(cp)
+        except Exception:
+            cp = None
+        return get_etf_dividend_yield(query, info, cp, last_n=last_n)
     if info.market != "a-share":
         return {
             "ok": False, "query": query,
             "resolved": {"code": info.code, "name": info.name, "market": info.market},
-            "error": f"分红数据当前只支持 A 股和港股；{info.market} 暂未实现",
+            "error": f"分红数据当前只支持 A 股、港股、A 股 ETF；{info.market} 暂未实现",
         }
 
     history = _dividend_history_a_share(info.code)
