@@ -629,6 +629,164 @@ def _algorithm_2_forecast(by_fy: list[dict], current_price: float | None,
     return out
 
 
+def _dividend_history_hk(code: str) -> list[dict]:
+    """Pull HK dividend history via akshare → 东财 stock_hk_dividend_payout_em.
+
+    Returns list of dividend events sorted **most-recent first** with normalized fields:
+      announce_date / fiscal_year / per_share_hkd / ex_date / dispatch_date /
+      div_type (年度分配/中期分配/特别分配/季度分配)
+
+    Empty list on any failure.
+    """
+    try:
+        import akshare as ak
+        df = ak.stock_hk_dividend_payout_em(symbol=code)
+    except Exception as e:
+        log.warning("stock_hk_dividend_payout_em failed for %s: %s", code, e)
+        return []
+    if df is None or df.empty:
+        return []
+
+    def _date_str(v):
+        if v is None: return None
+        s = str(v)
+        if s in ("NaT", "nan", "None", ""): return None
+        if hasattr(v, "strftime"):
+            try: return v.strftime("%Y-%m-%d")
+            except (ValueError, TypeError): return None
+        return s[:10]
+
+    # Parse 分红方案 to extract HKD per-share amount
+    # Examples:
+    #   "每股派港币5.3元" → 5.3
+    #   "每股派美元0.1元(相当于港币0.783595元(计算值))" → 0.783595
+    #   "特殊说明:..." → 0 (skip non-cash dividends)
+    import re
+    RE_HKD = re.compile(r"港币\s*([\d.]+)\s*元")
+    RE_HKD_INLINE = re.compile(r"派港币\s*([\d.]+)\s*元")
+
+    out = []
+    for _, row in df.iterrows():
+        try:
+            scheme = str(row.get("分红方案") or "")
+            # Try inline pattern first, then fallback to any HKD mention
+            m = RE_HKD_INLINE.search(scheme)
+            if not m:
+                m = RE_HKD.search(scheme)
+            per_share_hkd = float(m.group(1)) if m else 0.0
+            # Skip non-cash dividends (stock splits etc)
+            if per_share_hkd <= 0 and ("派" not in scheme or "股份" in scheme):
+                continue
+
+            out.append({
+                "announce_date": _date_str(row.get("最新公告日期")),
+                "fiscal_year": str(row.get("财政年度") or ""),
+                "per_share_hkd": round(per_share_hkd, 4),
+                "div_type": str(row.get("分配类型") or ""),
+                "ex_date": _date_str(row.get("除净日")),
+                "dispatch_date": _date_str(row.get("发放日")),
+                "scheme_raw": scheme,
+            })
+        except Exception as e:
+            log.warning("HK dividend row parse failed for %s: %s", code, e)
+            continue
+
+    out.sort(key=lambda r: r["announce_date"] or "", reverse=True)
+    return out
+
+
+def _get_dividend_history_hk(query: str, info, last_n: int = 10) -> dict:
+    """HK dividend yield — only Algorithm 1 (historical), no forecasts (EPS data unreliable)."""
+    history = _dividend_history_hk(info.code)
+
+    # Get current price
+    current_price = None
+    try:
+        tc = _tencent_fetch(info.tencent_symbol)
+        c = tc.get("current")
+        if c and c > 0:
+            current_price = float(c)
+    except Exception:
+        pass
+
+    if not history:
+        return {
+            "ok": True, "query": query,
+            "resolved": {"code": info.code, "name": info.name, "market": "hk"},
+            "current_price": current_price,
+            "history": [],
+            "algorithm_1_historical": {"note": "无分红记录"},
+            "algorithm_2_forecast": {"note": "港股暂不支持预测算法（EPS 数据不全）"},
+            "source": "akshare/stock_hk_dividend_payout_em",
+            "note": "未查询到港股分红记录",
+        }
+
+    # Group by fiscal_year, sum all dividends per year
+    from collections import defaultdict
+    by_fy = defaultdict(lambda: {"per_share_total_hkd": 0.0, "events": []})
+    for h in history:
+        fy = h["fiscal_year"]
+        if not fy:
+            continue
+        by_fy[fy]["per_share_total_hkd"] = round(by_fy[fy]["per_share_total_hkd"] + h["per_share_hkd"], 4)
+        by_fy[fy]["events"].append({
+            "announce_date": h["announce_date"],
+            "ex_date": h["ex_date"],
+            "per_share_hkd": h["per_share_hkd"],
+            "div_type": h["div_type"],
+        })
+
+    fy_list = sorted(by_fy.items(), key=lambda x: x[0], reverse=True)
+
+    # Algorithm 1: take latest complete year (skip current year if incomplete)
+    # Heuristic: a year is "complete" if its earliest event has ex_date or if it has 年度分配
+    algo1 = None
+    for fy, info_fy in fy_list:
+        has_annual = any(e["div_type"] in ("年度分配", "末期分配") for e in info_fy["events"])
+        # Use this year if it has annual distribution OR if it's at least 1 year old
+        from datetime import date
+        latest_announce = max((e.get("announce_date") or "" for e in info_fy["events"]), default="")
+        is_old_enough = latest_announce < (date.today().replace(year=date.today().year - 1).strftime("%Y-%m-%d"))
+
+        if has_annual or is_old_enough:
+            total_div = info_fy["per_share_total_hkd"]
+            yield_pct = (total_div / current_price * 100) if current_price else None
+            calc = (
+                f"算法 1（历史口径）：\n"
+                f"  - 选取最近完整财年: {fy}\n"
+                f"  - 该年全部派息（含中期/末期/特别）: {total_div} 港币/股\n"
+                f"  - 当前股价: {current_price} 港币\n"
+                f"  - 股息率 = {total_div} / {current_price} = {yield_pct:.2f}%" if current_price else
+                f"算法 1：缺当前股价"
+            )
+            algo1 = {
+                "fiscal_year": fy,
+                "total_dividend_per_share_hkd": total_div,
+                "current_price_hkd": current_price,
+                "yield_pct": round(yield_pct, 2) if yield_pct is not None else None,
+                "events": info_fy["events"],
+                "calculation": calc,
+            }
+            break
+
+    if algo1 is None:
+        algo1 = {"note": "未找到完整财年数据"}
+
+    return {
+        "ok": True, "query": query,
+        "resolved": {"code": info.code, "name": info.name, "market": "hk"},
+        "fetched_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "current_price": current_price,
+        "history": history[:last_n],
+        "by_fiscal_year": [{"fy": fy, **dict(info_fy)} for fy, info_fy in fy_list[:5]],
+        "algorithm_1_historical": algo1,
+        "algorithm_2_forecast": {
+            "note": "港股暂不支持预测算法 — akshare 港股 EPS 数据不全，无法外推。建议参考算法 1 历史口径。"
+        },
+        "source": "akshare/stock_hk_dividend_payout_em",
+    }
+
+
 def get_dividend_history(query: str, *, last_n: int = 10) -> dict:
     """Public dividend-history fetcher with two yield algorithms. A-share only.
 
@@ -644,11 +802,13 @@ def get_dividend_history(query: str, *, last_n: int = 10) -> dict:
     info = resolve_ticker(query)
     if info is None:
         return {"ok": False, "query": query, "error": f"无法识别股票：{query!r}"}
+    if info.market == "hk":
+        return _get_dividend_history_hk(query, info, last_n)
     if info.market != "a-share":
         return {
             "ok": False, "query": query,
             "resolved": {"code": info.code, "name": info.name, "market": info.market},
-            "error": f"分红数据当前只支持 A 股；{info.market} 暂未实现",
+            "error": f"分红数据当前只支持 A 股和港股；{info.market} 暂未实现",
         }
 
     history = _dividend_history_a_share(info.code)
