@@ -33,6 +33,14 @@
 - [20. Agentic RAG 升级（轻量版）](#20-agentic-rag-升级轻量版)
 - [21. 三层数据架构（结构化 MCP + web_search + agent-browser）](#21-三层数据架构结构化-mcp--web_search--agent-browser)
 - [22. 多人对话（问所有人横向对比）](#22-多人对话问所有人横向对比)
+- [23. 投资日报（/report）](#23-投资日报report)
+- [24. 投资记录系统 /journal](#24-投资记录系统-journal)
+- [25. 个股研究页 /stock/{ticker}](#25-个股研究页-stockticker)
+- [26. 观点时间线 + 共识仪表板](#26-观点时间线--共识仪表板)
+- [27. 决策回顾引擎](#27-决策回顾引擎)
+- [28. Token 用量监控仪表盘（管理员）](#28-token-用量监控仪表盘管理员)
+- [29. 分红股息率工具（A 股 + 港股 + ETF）](#29-分红股息率工具a-股--港股--etf)
+- [30. 全局搜索（zhihu 归档站）](#30-全局搜索zhihu-归档站)
 
 ---
 
@@ -1814,7 +1822,7 @@ messages.append(current_user_text)
 |----|----------|----------|
 | 🌐 全球行情 | Tencent `qt.gtimg.cn` batched | 每次访问 + 60s in-mem 缓存 |
 | ⭐ 我的自选 | `user_watchlist` + Tencent quotes | 同上 |
-| 📰 金十重要事件 | jin10 flash-api → LLM 标 利好/利空 | 30 min APScheduler，启动 1 次 |
+| 📰 金十重要事件 | jin10 flash-api 原始新闻 | 每 4h APScheduler，启动 1 次 ⚠️ v0.6: 已去掉 LLM 利好/利空判断 |
 | ✍ 博主今日观点 | zhihu.db 前一日新帖 → advisor LLM | 03:30 cron |
 | ⭐ 自选股相关动态 | blogger_brief.mentioned_tickers cross-ref + web_search news | 03:35 cron |
 
@@ -1839,12 +1847,12 @@ messages.append(current_user_text)
 `AsyncIOScheduler(timezone="Asia/Shanghai")` 装在 FastAPI lifespan 里：
 
 ```python
-scheduler.add_job(refresh_jin10_news, IntervalTrigger(minutes=30), id="jin10_news")
+scheduler.add_job(refresh_jin10_news, IntervalTrigger(hours=4), id="jin10_news")  # v0.6 起每 4 小时，无 LLM
 scheduler.add_job(refresh_jin10_news, "date", id="jin10_news_initial")        # startup
 scheduler.add_job(generate_briefs_for_day, CronTrigger(hour=3, minute=30),    # 博主前一日总结
                   id="blogger_brief_daily")
-scheduler.add_job(generate_ticker_briefs_for_day, CronTrigger(hour=3, minute=35),
-                  id="ticker_brief_daily")                                    # 紧跟在博主总结之后
+scheduler.add_job(generate_ticker_briefs_for_day, CronTrigger(hour=8, minute=0),
+                  id="ticker_brief_morning")  # v0.6: 8:00 + 19:00；无 LLM，纯数据聚合
 ```
 
 依赖链（每日凌晨）：
@@ -1861,7 +1869,7 @@ scheduler.add_job(generate_ticker_briefs_for_day, CronTrigger(hour=3, minute=35)
 
 复用 `openclaw/advisor` agent，**没有**新建 agent。
 单日 LLM 调用次数：
-- jin10 批量 1 条 prompt（一次性分类 top-10 条）= 1 次 / 30 min = ~48 次/天
+- jin10 新闻同步（v0.6 起无 LLM）= 0 次 LLM 调用
 - blogger_brief = N 个 zhihu 博主 = 5 次/天
 - ticker_brief = M 个全用户独立 ticker（去重）= 3-30 次/天 取决于用户活跃度
 
@@ -1909,6 +1917,214 @@ UI 在 /report 自选股区每张 card 上展示 verdict tag (🟢利好/🔴利
 - `src/bigv_twins/web/templates/report/index.html` —— /report 单页模板（含全部 5 块）
 - `src/bigv_twins/web/templates/base.html` —— 顶 nav 加「📊 投资日报」入口
 - `/home/dtl/projects/zhihu/app/templates/base.html` —— zhihu 存档站 nav 加同名外链入口
+
+---
+
+
+
+---
+
+## 24. 投资记录系统 /journal
+
+> v0.6 新增。原「决策日志」改名「投资记录」，分两个板块。
+
+### 24.1 功能概览
+
+- **交易操作与思路记录**：每次买卖（建仓/加仓/减仓/清仓/补录）都可以填一条
+- **投资随笔**：纯文本心得记录，不绑定具体交易
+- 自动加入自选股、自动采集决策时环境快照（基本面 + 大盘 + 博主观点 + 大师语录）
+- 实时持仓视图：每只股的成本价、买入均价、盈亏、占总资金占比
+- 账户总资金管理：可设置总额、转入、转出，自动跟随浮盈变化
+
+### 24.2 关键路由
+
+```
+GET  /journal                  → 列表 + 实时持仓 + 投资随笔
+GET  /journal/new              → 创建表单（可预填 ticker / name）
+POST /journal/new              → 提交（异步采集环境快照）
+GET  /journal/{id}             → 详情（含 LLM 生成的回顾报告）
+POST /journal/{id}/edit        → 编辑
+POST /journal/{id}/close       → 清仓（创建独立 close 记录 + 关闭所有 active 记录）
+POST /journal/{id}/review/now  → 手动触发回顾
+POST /journal/note             → 创建投资随笔
+POST /journal/capital          → 设置 / 修改总资金（mode=set/deposit/withdraw）
+```
+
+### 24.3 数据库表
+
+- `decision_journal` — 交易记录（ticker, action, price, shares, reasoning, action_plan, target_price, stop_loss, snapshots...）
+- `decision_review` — 回顾报告（review_type, current_price, pnl_pct, review_report_md, user_reflection...）
+- `investment_notes` — 投资随笔（user_id, content, created_at）
+
+---
+
+## 25. 个股研究页 /stock/{ticker}
+
+> v0.6 新增。聚合一只股票所有相关信息。
+
+### 25.1 展示内容
+
+- **实时行情 + 基本面**：现价 / PE / PB / 总市值 / ROE / 股息率
+- **快捷操作**：💬 问大师（按需展示）/ 📊 观点时间线 / 📝 记录决策
+- **博主近 30 天提及**：从 `blogger_daily_brief.mentioned_tickers` 聚合
+- **最新动态**：来自 `ticker_daily_brief`（v0.6 起为纯数据聚合，无 LLM）
+- **你的操作记录**：从 `decision_journal` 查询（按 ticker code OR name 双匹配）
+- **回测记录**：博主提及后 14 天 vs 沪深 300 超额收益
+
+### 25.2 智能 URL
+
+- `/stock/航天彩虹` 自动 302 → `/stock/002389`（通过 `resolve_ticker()` 解析）
+- ETF（51xxxx/15xxxx/56xxxx）不显示新闻动态和问大师按钮
+- 港股（5 位代码）走专门的 Tencent HK 解析
+
+---
+
+## 26. 观点时间线 + 共识仪表板
+
+> v0.6 新增。Phase 1C + Phase 2B。
+
+### 26.1 观点时间线 /timeline/{ticker}
+
+每天 03:30 博主总结生成后，自动用 1 次 LLM 调用提取每只被提及股票的 sentiment（bullish/bearish/neutral/avoid），写入 `ticker_opinion_log` 表。
+
+页面按日期组织：
+- 每天一行，列出当天哪些博主提了、什么态度、一句话摘要
+- 每条带「当时股价」（异步补填）
+- 底部 Canvas 折线图：横轴日期、绿线看多人数、红线看空人数
+
+### 26.2 共识仪表板 /consensus
+
+聚合 `ticker_opinion_log` 数据，三个区域：
+- **高共识**（3+ 博主同向）
+- **高分歧**（同时有 bullish + bearish）
+- **独家视角**（仅 1 人提及）
+
+支持 `?days=7/14/30` 时间窗口切换。
+
+---
+
+## 27. 决策回顾引擎
+
+> v0.6 新增。Phase 2A。
+
+每天 20:00 cron 扫描 `decision_journal WHERE status='active' AND next_review_at <= today`，自动生成回顾报告：
+
+```
+- 当前股价 vs 决策日价格 → 涨跌幅
+- 决策理由 vs 实际走势 → 验证
+- 决策后博主新观点（查 ticker_opinion_log）
+- LLM 生成回顾报告（advisor agent）
+- 写入 decision_review 表
+- 更新 next_review_at（7天 → 30天 → 90天 → 180天 递增）
+```
+
+用户可在 `/journal/{id}` 详情页看历史回顾，也可以点「立即回顾」手动触发，并填写个人反思 + 经验教训 + 后续操作。
+
+---
+
+## 28. Token 用量监控仪表盘（管理员）
+
+> v0.6 新增。零 LLM。
+
+### 28.1 数据来源
+
+`~/.openclaw/agents/*/sessions/*.jsonl` 每条 message 事件里的 `usage` 字段：
+
+```json
+{
+  "type": "message",
+  "timestamp": "2026-05-28T07:16:08.568Z",
+  "message": {
+    "model": "qwen3.5-plus",
+    "usage": {"input": 21967, "output": 959}
+  }
+}
+```
+
+### 28.2 数据流
+
+```
+JSONL 实时追加（OpenClaw 写）
+    ↓ 每小时 cron 扫描
+token_usage_hourly 表（按小时聚合）
+    ↓ 打开 /admin 时实时计算
+仪表盘展示（今日/本月卡片 + 折线图 + 月报）
+```
+
+### 28.3 功能
+
+- **今日 + 本月**两张卡片：调用次数 / input tokens / output tokens / credits
+- **模型选择按钮组**（醒目大卡片）：经济(flash) / 均衡(plus) / 旗舰(max)
+- **折线图三视图**：今日 24h / 近 30 天 / 近 6 月
+- **月度账单归档**：按 27→27 计费周期，自动推荐能负担起的最高档模型
+- **手动刷新按钮**：不等小时 cron 就能拿到最新数据
+
+### 28.4 关键路由
+
+```
+GET  /admin/api/token-usage?model={model}    → JSON 给前端图表
+POST /admin/api/token-usage/refresh          → 手动重扫
+GET  /admin/api/monthly-reports              → 各计费周期 markdown 报告列表
+```
+
+---
+
+## 29. 分红股息率工具（A 股 + 港股 + ETF）
+
+> v0.6 大改造。`bigv-market.get_dividend_history` 自动路由到对应实现。
+
+### 29.1 A 股个股
+
+两个算法都展示：
+- **算法 1（历史口径）**：上一完整财年总分红 / 现价
+- **算法 2（预测口径）**：近 N 年平均派息率 × 预测下年 EPS / 现价
+
+### 29.2 港股个股
+
+只有算法 1（akshare 港股 EPS 数据不全，无法外推算法 2）。
+- 数据源：`ak.stock_hk_dividend_payout_em`
+- 解析「每股派港币 X 元」/「美元 X 元(相当于港币 Y 元)」两种格式
+- 按财政年度分组累加（含中期 + 末期 + 特别）
+
+### 29.3 A 股 ETF（51xxxx/15xxxx/56xxxx）
+
+自动检测频率（基于近 12 次分红平均间隔天数）：
+
+| 频率 | 计算 |
+|------|------|
+| 月度（间隔 ≤ 45 天）| 过去 12 个月加总 / 现价 + CV 稳定性 |
+| 季度（≤ 130 天）| rolling 12 月 + 上一完整年 + 上上年三窗口对照 + CV |
+| 年度（≤ 400 天）| 近 3 年逐年股息率 + CV |
+
+CV（变异系数 = 标准差/均值）作为稳定性指标：
+- < 0.15 非常稳定 / 0.15-0.30 较为稳定 / 0.30-0.50 中等波动 / > 0.50 波动较大
+
+**招募说明书条款提取**（best-effort）：
+- 从东财公告 API 找最新「招募说明书」PDF
+- pypdf 提取「基金收益分配原则」章节前 800 字
+- 告诉用户合同允许的频率（可能跟历史实际不同）
+
+### 29.4 三种对话差异化
+
+| 角色 | 个股分红 | ETF 分红 |
+|------|---------|---------|
+| **AI 投顾** | 算法 1 + 算法 2（A股）/ 算法 1（港股）| ✅ 完整支持 |
+| **知乎博主** | 同 | ❌ 转向分析背后指数/行业 + 提醒问 AI 投顾 |
+| **大师** | 同 | ❌ 同博主 |
+
+实现位置：`src/bigv_twins/etf_dividend.py` + `etf_prospectus.py` + `stock_data.py:get_dividend_history()`
+
+---
+
+## 30. 全局搜索（zhihu 归档站）
+
+> v0.5 上线，v0.6 维护中。zhihu 项目 `/home/dtl/projects/zhihu/` 那边的功能。
+
+- `/search/bloggers`：博主归档全文搜索（17K+ 知乎答案/文章），FTS5 trigram tokenizer
+- `/search/masters`：大师归档全文搜索（450+ 章节 + 演讲）
+- 短查询（< 3 字）自动 LIKE 兜底
+- 博主搜索结果链接到本地归档（避免已删帖 404），知乎原文做小角标
+- 每小时 cron 重建索引（zhihu 项目内）
 
 ---
 
