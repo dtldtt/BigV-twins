@@ -22,8 +22,8 @@ from sqlalchemy.exc import IntegrityError
 
 from bigv_twins.config import BLOGGERS, settings
 
-from . import db, openclaw_client
-from .db import BloggerDailyBrief
+from . import db
+from .db import BloggerDailyBrief, TickerOpinionLog
 
 log = logging.getLogger("bigv_twins.web.blogger_brief")
 
@@ -82,28 +82,50 @@ def fetch_blogger_posts_for_day(author_id: int, day_str: str) -> list[dict]:
 
 _SUMMARIZER_SYS = (
     "你是「赛博大V 投资日报」的总结助手。给你一位投资博主在某一天发的所有"
-    "新帖子（答案 / 文章 / 想法的全文或截断），输出**当日主要观点** + "
-    "**后续建议**两段，让用户一眼读懂这位博主今天在想什么。\n\n"
+    "新帖子（答案 / 文章 / 想法的原文），你的任务是**准确还原博主的真实表达**，"
+    "让用户不用读原文也能精准 grasp 博主今天的判断、情绪、动作。\n\n"
     "## 输出 JSON 格式（严格）\n\n"
     "{\n"
-    '  "main_view": "主要观点 80-150 字。多个主题用「；」连接。不要列条 bullet。",\n'
-    '  "suggestion": "后续建议 ≤ 40 字。如「继续持有 / 等回调 / 关注 X / 现金为王」之类。'
-    "若该博主当日没明确建议倾向，写「未明确表态」。\",\n"
-    '  "mentioned_tickers": ["600519", "00700"]  (该博主当日提到的股票 ticker；'
-    "若有名字无代码可省略；空列表表示当日没具体股票)\n"
+    '  "main_view": "主要观点 80-180 字。多个主题用「；」串接并按重要性排序。",\n'
+    '  "suggestion": "后续建议 ≤ 40 字。'
+    "若博主没明确表态写「未明确表态」。\",\n"
+    '  "ticker_opinions": [\n'
+    '    {"ticker": "600519", "ticker_name": "贵州茅台", "sentiment": "bullish", '
+    '"summary": "30字内一句话原文摘要"}\n'
+    "  ]\n"
     "}\n\n"
-    "## 规则\n\n"
+    "## ticker_opinions 字段说明\n\n"
+    "- 列出博主当日提到的**每只**股票。\n"
+    "- sentiment 4 选 1：\n"
+    "  - bullish（看多）— 明确推荐 / 买入 / 加仓 / 看好后市\n"
+    "  - bearish（看空）— 明确不看好 / 觉得高估 / 预期下跌\n"
+    "  - avoid（回避）— 明确建议不要碰 / 远离 / 风险大\n"
+    "  - neutral（中性）— 仅提及讨论、跟踪、未明确态度\n"
+    "- summary 必须**贴着原文**写，30 字以内，能引用就直接引用博主原话\n"
+    "- ticker 只收 6 位 A 股代码或 5 位港股代码；只有名字找不到代码的省略\n\n"
+    "## 写作硬约束\n\n"
     "1. 只输出 JSON，不要 markdown 代码块包裹\n"
-    "2. main_view 用第三人称（「他认为」「他强调」），不要伪装成博主第一人称\n"
-    "3. 忠于原文，**不要外推**博主没说的话\n"
-    "4. 若多个帖子讲不同主题，main_view 用「；」分点，按重要性排序\n"
-    "5. mentioned_tickers 只收 6 位 A 股代码（如 600519 / 002475 / 300750）和 5 位港股代码\n"
+    "2. main_view 用第三人称（「他认为」「他强调」），不要伪装博主第一人称\n"
+    "3. **忠于原文** — 严禁外推、脑补、加戏；博主只说「看好 A」，不要写成「对 A 长期看好」\n"
+    "4. 多个帖子讲不同主题时，main_view 用「；」分主题，按博主自己强调的程度排\n"
+    "   重要的话题不要因为篇幅压缩被丢掉\n"
+    "5. 博主对某票的态度有变化时（早上看多下午改口），sentiment 取**当日最后表态**，"
+    "   summary 里要点出「由X转Y」\n"
+    "6. 如果博主提了某票但只是顺带（如「想起去年买 X」），sentiment 用 neutral\n"
+    "7. 不要把别人的观点（博主转述、引用别人的话）当成博主自己的观点\n"
 )
+
+
+_VALID_SENTIMENTS = {"bullish", "bearish", "avoid", "neutral"}
 
 
 async def summarize_blogger(blogger_slug: str, blogger_name: str,
                             posts: list[dict]) -> dict:
-    """LLM single call → {"main_view", "suggestion", "mentioned_tickers"}.
+    """LLM single call → {"main_view", "suggestion", "mentioned_tickers", "ticker_opinions"}.
+
+    走 Qoder SDK performance（推理重，且需要严格忠于原文，flash 会丢信息 / 加戏）。
+    ticker_opinions 是新加的：每只票直接带 sentiment + summary，省一次 LLM
+    （之前 opinion_extractor 是单独一次调用解析这步的输出反推情绪）。
 
     Empty posts → returns a placeholder dict rather than calling LLM.
     """
@@ -112,6 +134,7 @@ async def summarize_blogger(blogger_slug: str, blogger_name: str,
             "main_view": "（当日无新帖子）",
             "suggestion": "—",
             "mentioned_tickers": [],
+            "ticker_opinions": [],
         }
 
     user_input_parts = [f"博主：{blogger_name} (slug={blogger_slug})\n",
@@ -124,23 +147,17 @@ async def summarize_blogger(blogger_slug: str, blogger_name: str,
         user_input_parts.append(head + "\n")
         user_input_parts.append(p["text"] + "\n")
 
-    messages = [
-        {"role": "system", "content": _SUMMARIZER_SYS},
-        {"role": "user", "content": "".join(user_input_parts)},
-    ]
-    buf: list[str] = []
-    try:
-        async for delta in openclaw_client.stream_chat(messages, model="openclaw/advisor"):
-            buf.append(delta)
-    except Exception as e:
-        log.exception("blogger_brief LLM call failed for %s: %s", blogger_slug, e)
+    prompt = _SUMMARIZER_SYS + "\n\n---\n\n" + "".join(user_input_parts)
+    raw = await _call_qoder_brief(prompt, blogger_slug)
+    if raw is None:
         return {
-            "main_view": f"（LLM 总结失败：{e}）",
+            "main_view": "（LLM 总结失败）",
             "suggestion": "—",
             "mentioned_tickers": [],
+            "ticker_opinions": [],
         }
 
-    full = "".join(buf).strip()
+    full = raw.strip()
     if full.startswith("```"):
         full = re.sub(r"^```(?:json)?\n", "", full)
         full = re.sub(r"\n```$", "", full)
@@ -148,19 +165,78 @@ async def summarize_blogger(blogger_slug: str, blogger_name: str,
         obj = json.loads(full)
     except json.JSONDecodeError:
         log.warning("blogger_brief JSON parse failed for %s: %r", blogger_slug, full[:400])
-        # Fall back: store raw LLM output as main_view
         return {
             "main_view": full[:500] or "（解析失败）",
             "suggestion": "—",
             "mentioned_tickers": [],
+            "ticker_opinions": [],
         }
 
+    # 校验 + 归一 ticker_opinions
+    raw_ops = obj.get("ticker_opinions") or []
+    ticker_opinions: list[dict] = []
+    if isinstance(raw_ops, list):
+        for op in raw_ops:
+            if not isinstance(op, dict):
+                continue
+            tcode = str(op.get("ticker", "")).strip()
+            if not (tcode.isdigit() and len(tcode) in (5, 6)):
+                continue
+            sent = op.get("sentiment", "neutral")
+            if sent not in _VALID_SENTIMENTS:
+                sent = "neutral"
+            ticker_opinions.append({
+                "ticker": tcode,
+                "ticker_name": str(op.get("ticker_name") or tcode)[:60],
+                "sentiment": sent,
+                "summary": str(op.get("summary") or "")[:80],
+            })
+
+    # mentioned_tickers 从 ticker_opinions 派生，向后兼容老消费者（backtest 等）
+    mentioned = [op["ticker"] for op in ticker_opinions]
+
     return {
-        "main_view": (obj.get("main_view") or "")[:600],
+        "main_view": (obj.get("main_view") or "")[:800],
         "suggestion": (obj.get("suggestion") or "")[:80],
-        "mentioned_tickers": [str(t) for t in (obj.get("mentioned_tickers") or [])
-                              if str(t).isdigit() and len(str(t)) in (5, 6)],
+        "mentioned_tickers": mentioned,
+        "ticker_opinions": ticker_opinions,
     }
+
+
+async def _call_qoder_brief(prompt: str, blogger_slug: str) -> str | None:
+    """走 Qoder SDK performance 跑博主日报总结。失败返回 None。"""
+    if not settings.qoder_personal_access_token:
+        log.warning("brief %s skipped: QODER_PERSONAL_ACCESS_TOKEN not set", blogger_slug)
+        return None
+    try:
+        from qoder_agent_sdk import (
+            AssistantMessage, QoderAgentOptions, access_token, query,
+        )
+    except ImportError as e:
+        log.warning("qoder_agent_sdk import failed: %s", e)
+        return None
+    options = QoderAgentOptions(
+        auth=access_token(settings.qoder_personal_access_token),
+        model="performance",
+    )
+    pieces: list[str] = []
+    try:
+        async for msg in query(prompt=prompt, options=options):
+            if isinstance(msg, AssistantMessage):
+                content = getattr(msg, "content", None)
+                if isinstance(content, list):
+                    for c in content:
+                        if isinstance(c, dict) and c.get("type") == "text":
+                            pieces.append(c.get("text", ""))
+                        elif hasattr(c, "text"):
+                            pieces.append(c.text)
+                elif isinstance(content, str):
+                    pieces.append(content)
+    except Exception as e:
+        log.warning("qoder brief failed for %s: %s", blogger_slug, e)
+        return None
+    text = "".join(pieces).strip()
+    return text or None
 
 
 async def generate_briefs_for_day(day_str: str | None = None) -> dict[str, int]:
@@ -217,20 +293,11 @@ async def generate_briefs_for_day(day_str: str | None = None) -> dict[str, int]:
             try:
                 await s.commit()
                 generated += 1
-                # Extract per-ticker sentiment (Phase 1C)
-                if result["mentioned_tickers"]:
-                    try:
-                        from .opinion_extractor import extract_opinions_from_brief
-                        await extract_opinions_from_brief(
-                            blogger_slug=b.slug,
-                            blogger_name=b.name,
-                            brief_date=day_str,
-                            brief_md=brief_md,
-                            mentioned_tickers=result["mentioned_tickers"],
-                            brief_id=row.id,
-                        )
-                    except Exception as e:
-                        log.warning("opinion extraction failed for %s: %s", b.slug, e)
+                # 把 brief LLM 一次性输出的 ticker_opinions 直接写入 ticker_opinion_log
+                # （之前是再调一次 LLM 反推情绪 → 又慢又有信息损失）
+                if result.get("ticker_opinions"):
+                    await _write_opinion_log(b.slug, day_str, row.id,
+                                              result["ticker_opinions"])
             except IntegrityError:
                 await s.rollback()
                 skipped += 1  # race with another instance
@@ -238,6 +305,31 @@ async def generate_briefs_for_day(day_str: str | None = None) -> dict[str, int]:
     log.info("generate_briefs_for_day(%s) done in %.1fs: generated=%d skipped=%d errors=%d",
              day_str, time.time() - t0, generated, skipped, errors)
     return {"generated": generated, "skipped_existing": skipped, "errors": errors}
+
+
+async def _write_opinion_log(blogger_slug: str, brief_date: str,
+                              brief_id: int, opinions: list[dict]) -> int:
+    """把 ticker_opinions 列表写入 ticker_opinion_log 表。重复条目静默跳过。"""
+    count = 0
+    async with db._SessionFactory() as session:
+        for op in opinions:
+            try:
+                session.add(TickerOpinionLog(
+                    ticker=op["ticker"],
+                    ticker_name=op.get("ticker_name", op["ticker"]),
+                    blogger_slug=blogger_slug,
+                    opinion_date=brief_date,
+                    sentiment=op["sentiment"],
+                    summary=op.get("summary", "")[:100],
+                    source_brief_id=brief_id,
+                ))
+                await session.flush()
+                count += 1
+            except Exception:
+                await session.rollback()
+                continue
+        await session.commit()
+    return count
 
 
 async def get_latest_briefs() -> list[BloggerDailyBrief]:
