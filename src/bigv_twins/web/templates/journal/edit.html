@@ -11,38 +11,47 @@
 </nav>
 
 <h2>✏️ 编辑交易记录</h2>
+<p class="muted" style="margin-top:-0.5rem; margin-bottom:1.5rem">
+  股票代码和名称不可改，其他字段都可以修改。日期可以改成历史时间（补录场景）。
+</p>
 
 <form method="post" action="/journal/{{ j.id }}/edit" class="journal-form">
   <fieldset>
     <legend>标的与操作</legend>
     <div class="form-row">
       <label>
-        股票代码
-        <input type="text" value="{{ j.ticker }}" disabled style="opacity:0.6">
+        股票代码 <small class="muted">（不可修改）</small>
+        <input type="text" value="{{ j.ticker }}" readonly style="background:#f5f5f5">
       </label>
       <label>
-        股票名称
-        <input type="text" name="ticker_name" value="{{ j.ticker_name }}" required>
+        股票名称 <small class="muted">（不可修改）</small>
+        <input type="text" value="{{ j.ticker_name }}" readonly style="background:#f5f5f5">
       </label>
     </div>
     <div class="form-row">
       <label>
-        操作类型
-        <select name="action" required>
-          <option value="open" {% if j.action == 'open' %}selected{% endif %}>建仓</option>
+        操作类型 *
+        <select name="action" required id="action-select">
+          <option value="open" {% if j.action == 'open' %}selected{% endif %}>建仓（首次买入）</option>
           <option value="add" {% if j.action == 'add' %}selected{% endif %}>加仓</option>
           <option value="reduce" {% if j.action == 'reduce' %}selected{% endif %}>减仓</option>
-          <option value="close" {% if j.action == 'close' %}selected{% endif %}>清仓</option>
-          <option value="retroactive" {% if j.action == 'retroactive' %}selected{% endif %}>补录</option>
+          <option value="close" {% if j.action == 'close' %}selected{% endif %}>清仓（全部卖出）</option>
+          <option value="retroactive" {% if j.action == 'retroactive' %}selected{% endif %}>补录（已持有，录入历史仓位）</option>
         </select>
       </label>
       <label>
-        价格
+        决策时间 <small class="muted">（可改成历史日期）</small>
+        <input type="datetime-local" name="decision_at" value="{{ decision_at_iso }}">
+      </label>
+    </div>
+    <div class="form-row">
+      <label>
+        <span id="price-label">买入价格</span>
         <input type="number" name="price_at_decision" step="0.001" value="{{ j.price_at_decision or '' }}">
       </label>
       <label>
-        数量（股）
-        <input type="number" name="shares" step="1" value="{{ j.shares or '' }}">
+        <span id="shares-label">操作数量（股）</span>
+        <input type="number" name="shares" step="1" min="0" value="{{ j.shares or '' }}">
       </label>
     </div>
   </fieldset>
@@ -50,42 +59,42 @@
   <fieldset>
     <legend>决策逻辑</legend>
     <label>
-      核心理由
-      <textarea name="reasoning" rows="4">{{ j.reasoning or '' }}</textarea>
+      核心理由（可选，可后期补充） <small class="muted">（为什么做这个操作？）</small>
+      <textarea name="reasoning" rows="4" placeholder="例如：煤价底部企稳，当前 PE 仅 9 倍处于历史低位，股息率 5.8% 提供安全垫。">{{ j.reasoning or '' }}</textarea>
     </label>
     <label>
-      操作计划
-      <textarea name="action_plan" rows="3">{{ j.action_detail or '' }}</textarea>
+      操作计划 <small class="muted">（后续什么时候加仓/减仓/清仓离场）</small>
+      <textarea name="action_plan" rows="3" placeholder="例如：计划分 3 次建仓，当前先买 1/3；PE 到 8 以下再加；跌破 28 元清仓。半年后 PE>15 减仓一半。">{{ j.action_detail or '' }}</textarea>
     </label>
   </fieldset>
 
   <fieldset>
-    <legend>目标与预设</legend>
+    <legend>目标与预设（选填）</legend>
     <div class="form-row">
       <label>
         目标价
-        <input type="number" name="target_price" step="0.01" value="{{ j.target_price or '' }}">
+        <input type="number" name="target_price" step="0.01" value="{{ j.target_price or '' }}" placeholder="到达后考虑卖出">
       </label>
       <label>
         止损价
-        <input type="number" name="stop_loss_price" step="0.01" value="{{ j.stop_loss_price or '' }}">
+        <input type="number" name="stop_loss_price" step="0.01" value="{{ j.stop_loss_price or '' }}" placeholder="跌到这里止损">
       </label>
     </div>
     <div class="form-row">
       <label>
-        预期持有
+        预期持有时间
         <select name="expected_hold_period">
-          <option value="">--</option>
-          {% for v, l in [('1month','1个月'),('3months','3个月'),('6months','6个月'),('1year','1年'),('3years','3年+')] %}
+          <option value="">-- 选择 --</option>
+          {% for v, l in [('1month','1 个月'),('3months','3 个月'),('6months','6 个月'),('1year','1 年'),('3years','3 年以上')] %}
           <option value="{{ v }}" {% if j.expected_hold_period == v %}selected{% endif %}>{{ l }}</option>
           {% endfor %}
         </select>
       </label>
       <label>
-        跌10%
+        如果跌 10%
         <select name="if_drop_10pct">
-          <option value="">--</option>
-          {% for v, l in [('add','加仓'),('hold','持有'),('stop','止损'),('review','重新评估')] %}
+          <option value="">-- 选择 --</option>
+          {% for v, l in [('add','加仓'),('hold','持有不动'),('stop','止损'),('review','重新评估')] %}
           <option value="{{ v }}" {% if j.if_drop_10pct == v %}selected{% endif %}>{{ l }}</option>
           {% endfor %}
         </select>
@@ -93,8 +102,29 @@
     </div>
   </fieldset>
 
-  <button type="submit" style="width:100%">保存修改</button>
+  <div style="display:flex; gap:0.5rem">
+    <button type="submit" style="flex:1">保存修改</button>
+    <a href="/journal/{{ j.id }}" role="button" class="secondary outline" style="flex:0 0 auto">取消</a>
+  </div>
 </form>
+
+<script>
+const sel = document.getElementById('action-select');
+const priceLabel = document.getElementById('price-label');
+const sharesLabel = document.getElementById('shares-label');
+function updateLabels() {
+  switch(sel.value) {
+    case 'open': case 'add':
+      priceLabel.textContent = '买入价格'; sharesLabel.textContent = '操作数量（股）'; break;
+    case 'reduce': case 'close':
+      priceLabel.textContent = '卖出价格'; sharesLabel.textContent = '操作数量（股）'; break;
+    case 'retroactive':
+      priceLabel.textContent = '当前持仓成本价'; sharesLabel.textContent = '持有数量（股）'; break;
+  }
+}
+sel.addEventListener('change', updateLabels);
+updateLabels();  // sync on page load
+</script>
 
 <style>
 .journal-form fieldset { margin-bottom:1.5rem; }

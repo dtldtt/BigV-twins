@@ -408,10 +408,15 @@ async def journal_create_form(
 ):
     ticker = request.query_params.get("ticker", "")
     name = request.query_params.get("name", "")
+    from datetime import datetime
+    now_iso = datetime.now().strftime("%Y-%m-%dT%H:%M")
     return templates.TemplateResponse(
         request=request,
         name="journal/create.html",
-        context={"user": user, "prefill_ticker": ticker, "prefill_name": name},
+        context={
+            "user": user, "prefill_ticker": ticker, "prefill_name": name,
+            "now_iso": now_iso,
+        },
     )
 
 
@@ -432,6 +437,7 @@ async def journal_create(
     stop_loss_price: float = Form(None),
     expected_hold_period: str = Form(""),
     if_drop_10pct: str = Form(""),
+    decision_at: str = Form(""),
 ):
     # Resolve ticker: ALWAYS normalize to code. ticker_name only stores the name.
     raw_ticker = ticker.strip()
@@ -450,6 +456,15 @@ async def journal_create(
     if not raw_name:
         raw_name = raw_ticker
 
+    # Parse decision_at (HTML5 datetime-local: "2026-05-29T15:30")
+    created_at = None
+    if decision_at:
+        try:
+            from datetime import datetime
+            created_at = datetime.fromisoformat(decision_at)
+        except ValueError:
+            pass
+
     journal = DecisionJournal(
         user_id=user.id,
         ticker=raw_ticker,
@@ -467,6 +482,7 @@ async def journal_create(
         expected_hold_period=expected_hold_period or None,
         if_drop_10pct=if_drop_10pct or None,
         status="active",
+        **({"created_at": created_at} if created_at else {}),
     )
     session.add(journal)
     await session.flush()
@@ -533,10 +549,13 @@ async def journal_edit_form(
     journal = await session.get(DecisionJournal, jid)
     if not journal or journal.user_id != user.id:
         raise HTTPException(status_code=404)
+    decision_at_iso = (
+        journal.created_at.strftime("%Y-%m-%dT%H:%M") if journal.created_at else ""
+    )
     return templates.TemplateResponse(
         request=request,
         name="journal/edit.html",
-        context={"user": user, "j": journal},
+        context={"user": user, "j": journal, "decision_at_iso": decision_at_iso},
     )
 
 
@@ -545,7 +564,6 @@ async def journal_edit(
     jid: int,
     user: Annotated[User, Depends(auth.require_user)],
     session: Annotated[AsyncSession, Depends(db.get_session)],
-    ticker_name: str = Form(...),
     action: str = Form(...),
     price_at_decision: float = Form(None),
     shares: int = Form(None),
@@ -555,20 +573,27 @@ async def journal_edit(
     stop_loss_price: float = Form(None),
     expected_hold_period: str = Form(""),
     if_drop_10pct: str = Form(""),
+    decision_at: str = Form(""),
 ):
     journal = await session.get(DecisionJournal, jid)
     if not journal or journal.user_id != user.id:
         raise HTTPException(status_code=404)
-    journal.ticker_name = ticker_name.strip()
+    # ticker/ticker_name 锁死不可改（避免数据错乱）— 表单中是 readonly 不接收
     journal.action = action
     journal.price_at_decision = price_at_decision
     journal.shares = shares
-    journal.reasoning = reasoning
+    journal.reasoning = reasoning or None
     journal.action_detail = action_plan or None
     journal.target_price = target_price
     journal.stop_loss_price = stop_loss_price
     journal.expected_hold_period = expected_hold_period or None
     journal.if_drop_10pct = if_drop_10pct or None
+    if decision_at:
+        try:
+            from datetime import datetime
+            journal.created_at = datetime.fromisoformat(decision_at)
+        except ValueError:
+            pass
     await session.commit()
     return RedirectResponse(f"/journal/{jid}", status_code=303)
 

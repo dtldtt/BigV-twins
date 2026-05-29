@@ -14,10 +14,11 @@
   <div>
     <h2 style="margin:0">{{ j.ticker_name }} <code>{{ j.ticker }}</code></h2>
     <span class="journal-action journal-action-{{ j.action }}">
-      {% if j.action == 'buy' %}买入{% elif j.action == 'sell' %}卖出{% elif j.action == 'add' %}加仓{% elif j.action == 'reduce' %}减仓{% else %}{{ j.action }}{% endif %}
+      {% if j.action == 'open' %}建仓{% elif j.action == 'add' %}加仓{% elif j.action == 'reduce' %}减仓{% elif j.action == 'close' %}清仓{% elif j.action == 'retroactive' %}补录{% elif j.action == 'buy' %}买入{% elif j.action == 'sell' %}卖出{% else %}{{ j.action }}{% endif %}
     </span>
     <small class="muted">{{ j.created_at.strftime("%Y-%m-%d %H:%M") if j.created_at else "" }}</small>
     {% if j.status == 'closed' %}<span class="badge-closed">已平仓</span>{% endif %}
+    <a href="/journal/{{ j.id }}/edit" class="edit-link">✏️ 编辑</a>
   </div>
   <div class="detail-pnl">
     {% if j.status == 'active' and current_price and j.price_at_decision %}
@@ -246,7 +247,9 @@
 .up { color:#e53935; }
 .down { color:#43a047; }
 .journal-action { font-size:0.75rem; padding:0.15rem 0.5rem; border-radius:4px; }
-.journal-action-buy, .journal-action-add { background:#e8f5e9; color:#2e7d32; }
-.journal-action-sell, .journal-action-reduce { background:#ffebee; color:#c62828; }
+.journal-action-buy, .journal-action-add, .journal-action-open, .journal-action-retroactive { background:#e8f5e9; color:#2e7d32; }
+.journal-action-sell, .journal-action-reduce, .journal-action-close { background:#ffebee; color:#c62828; }
+.edit-link { font-size:0.78rem; color:#666; margin-left:0.5rem; text-decoration:none; padding:0.1rem 0.4rem; border-radius:3px; }
+.edit-link:hover { background:#f5f5f5; color:#333; }
 </style>
 {% endblock %}
