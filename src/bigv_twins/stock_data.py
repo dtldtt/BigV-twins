@@ -23,6 +23,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 import httpx
+from pathlib import Path
 
 log = logging.getLogger("bigv_twins.stock_data")
 
@@ -32,6 +33,8 @@ _NAME_MAP_CACHE: dict[str, Any] = {"ts": 0.0, "df": None}
 _SNAPSHOT_CACHE: dict[str, tuple[float, dict]] = {}
 SNAPSHOT_TTL_S = 600    # 10 min
 NAME_MAP_TTL_S = 3600   # 1 hour
+NAME_MAP_DISK_TTL_S = 86400 * 3  # 3 天内的磁盘缓存直接信任
+_NAME_MAP_DISK_PATH = Path("/tmp/bigv_a_share_names.csv")
 
 
 # ----- ticker resolution ---------------------------------------------
@@ -79,16 +82,40 @@ def _is_etf(code: str) -> bool:
 
 
 def _load_name_map():
-    """Cache code→name for A-share lookups."""
+    """Cache code→name for A-share lookups.
+
+    三层缓存：内存 1h → 磁盘 3 天 → 网络回源。
+    冷启动时（内存空但磁盘有），读磁盘几乎瞬时（< 50ms），避免每次 systemd
+    重启用户首次访问 /report 都要等 ~8s 拉 akshare 全市场名单。
+    """
     now = time.time()
     if _NAME_MAP_CACHE["df"] is not None and now - _NAME_MAP_CACHE["ts"] < NAME_MAP_TTL_S:
         return _NAME_MAP_CACHE["df"]
+
+    # 磁盘缓存：3 天内的直接信任（A 股新增/改名频率极低）
+    if _NAME_MAP_DISK_PATH.exists():
+        try:
+            mtime = _NAME_MAP_DISK_PATH.stat().st_mtime
+            if now - mtime < NAME_MAP_DISK_TTL_S:
+                import pandas as pd
+                df = pd.read_csv(_NAME_MAP_DISK_PATH, dtype={"code": str})
+                _NAME_MAP_CACHE["df"] = df
+                _NAME_MAP_CACHE["ts"] = mtime
+                return df
+        except Exception as e:
+            log.warning("name map disk read failed (will refetch): %s", e)
+
+    # 网络回源
     import akshare as ak
     for attempt in range(3):
         try:
             df = ak.stock_info_a_code_name()
             _NAME_MAP_CACHE["df"] = df
             _NAME_MAP_CACHE["ts"] = now
+            try:
+                df.to_csv(_NAME_MAP_DISK_PATH, index=False)
+            except Exception as e:
+                log.warning("name map disk write failed: %s", e)
             return df
         except Exception as e:
             log.warning("name map fetch attempt %d failed: %s", attempt + 1, e)
