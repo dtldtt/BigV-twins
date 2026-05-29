@@ -118,6 +118,9 @@ class Settings(BaseSettings):
     openclaw_config_path: Path = Path.home() / ".openclaw" / "openclaw.json"
     openclaw_agent_timeout_s: int = 180
 
+    # Qoder SDK — 用于 review_engine 等推理重的任务（performance 档比 flash 强很多）
+    qoder_personal_access_token: str = ""
+
     # Optional persona-gen fallback
     anthropic_api_key: str = ""
 

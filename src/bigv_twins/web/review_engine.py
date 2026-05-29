@@ -13,11 +13,22 @@ from datetime import date, timedelta
 
 from sqlalchemy import select
 
-from . import db, openclaw_client
+from bigv_twins.config import settings
+
+from . import db
 from .db import DecisionJournal, DecisionReview, TickerOpinionLog
 from .daily_brief import get_watchlist_quotes
 
 log = logging.getLogger("bigv_twins.web.review_engine")
+
+# 中文动作标签 — 给模型的 prompt 用，比 'open'/'add' 这种英文 enum 更准确
+_ACTION_ZH = {
+    "open": "建仓（首次买入）",
+    "add": "加仓",
+    "reduce": "减仓",
+    "close": "清仓",
+    "retroactive": "补录（已持有的旧仓位）",
+}
 
 
 class _FakeW:
@@ -29,28 +40,29 @@ class _FakeW:
         self.id = 0
 
 
-_REVIEW_PROMPT = """你是一个投资回顾助手。请根据以下信息生成一份简洁的投资回顾报告。
+_REVIEW_PROMPT = """你是一个投资回顾助手。请基于以下信息为这笔交易写一份简短的事后回顾。
 
 ## 原始决策
-- 标的：{ticker_name} ({ticker})
-- 操作：{action}
+- 标的：{ticker_name}（{ticker}）
+- 操作：{action_zh}
 - 决策日：{decision_date}
 - 决策价：¥{decision_price}
-- 决策理由：{reasoning}
+- 决策理由：{reasoning_section}
 {plan_section}
 ## 当前状态
 - 当前价：¥{current_price}
-- 涨跌幅：{pnl_pct}
-- 距决策已过：{days_passed} 天
+- 距决策涨跌：{pnl_pct}
+- 持有天数：{days_passed} 天
 {opinions_section}
-## 请生成回顾报告
+## 输出要求
 
-格式要求（Markdown）：
-1. **表现回顾**：一句话概括决策结果
-2. **逻辑验证**：当初的理由现在看是否成立
-3. **建议思考**：给用户 1-2 个值得反思的问题
+用 Markdown 输出三段，限 200 字以内：
 
-限 200 字以内。
+1. **表现回顾**：一句话概括 — 涨/跌多少，相对当时是赚是亏。
+2. **逻辑验证**：{verify_instruction}
+3. **建议思考**：给用户提 1 个值得反思的具体问题（不要泛泛的"是否要止盈"，要结合上面提到的事实）。
+
+不要编造任何不在上述信息里的数据（PE、市值、行业新闻等都不要瞎说）。
 """
 
 
@@ -90,31 +102,70 @@ async def generate_review_for_journal(journal: DecisionJournal) -> str | None:
     if journal.stop_loss_price:
         plan_section += f"- 止损价：¥{journal.stop_loss_price}\n"
 
+    # 没填理由（比如 CSV 批量补录的）→ 改变 "逻辑验证" 的指令措辞
+    if journal.reasoning and journal.reasoning.strip():
+        reasoning_section = journal.reasoning[:300]
+        verify_instruction = "结合上面的决策理由，看当初的判断现在站得住吗？"
+    else:
+        reasoning_section = "（用户没有记录当时的思路）"
+        verify_instruction = (
+            "用户当时没记录思路。结合决策后的博主观点和现价表现，"
+            "推测当时的买入逻辑可能是什么，并说明现在看是否成立。"
+        )
+
     prompt = _REVIEW_PROMPT.format(
         ticker_name=journal.ticker_name,
         ticker=journal.ticker,
-        action=journal.action,
+        action_zh=_ACTION_ZH.get(journal.action, journal.action),
         decision_date=journal.created_at.strftime("%Y-%m-%d") if journal.created_at else "?",
         decision_price=f"{journal.price_at_decision:.2f}",
-        reasoning=journal.reasoning[:200],
+        reasoning_section=reasoning_section,
         plan_section=plan_section,
         current_price=f"{current_price:.2f}",
         pnl_pct=f"{pnl_pct:+.1f}%",
         days_passed=days_passed,
         opinions_section=opinions_section,
+        verify_instruction=verify_instruction,
     )
 
-    try:
-        response = ""
-        async for delta in openclaw_client.stream_chat(
-            [{"role": "user", "content": prompt}],
-            model="openclaw/advisor",
-        ):
-            response += delta
-        return response.strip()
-    except Exception as e:
-        log.warning("review generation failed for journal %d: %s", journal.id, e)
+    return await _call_qoder(prompt, journal.id)
+
+
+async def _call_qoder(prompt: str, journal_id: int) -> str | None:
+    """走 Qoder SDK performance 模式（推理重的任务比 flash 强很多，不会乱编 PE）。"""
+    if not settings.qoder_personal_access_token:
+        log.warning("review %d skipped: QODER_PERSONAL_ACCESS_TOKEN not set", journal_id)
         return None
+    try:
+        from qoder_agent_sdk import (
+            AssistantMessage, QoderAgentOptions, access_token, query,
+        )
+    except ImportError as e:
+        log.warning("qoder_agent_sdk import failed: %s", e)
+        return None
+
+    options = QoderAgentOptions(
+        auth=access_token(settings.qoder_personal_access_token),
+        model="performance",
+    )
+    pieces: list[str] = []
+    try:
+        async for msg in query(prompt=prompt, options=options):
+            if isinstance(msg, AssistantMessage):
+                content = getattr(msg, "content", None)
+                if isinstance(content, list):
+                    for c in content:
+                        if isinstance(c, dict) and c.get("type") == "text":
+                            pieces.append(c.get("text", ""))
+                        elif hasattr(c, "text"):
+                            pieces.append(c.text)
+                elif isinstance(content, str):
+                    pieces.append(content)
+    except Exception as e:
+        log.warning("qoder review failed for journal %d: %s", journal_id, e)
+        return None
+    text = "".join(pieces).strip()
+    return text or None
 
 
 # Review interval: 7→30→90→180 days
