@@ -313,6 +313,9 @@ class BacktestEntry(Base):
     hit: Mapped[bool | None] = mapped_column(Boolean, nullable=True)         # True=excess>0
     # 'complete' | 'pending' (窗口未到期) | 'no_data' (akshare 拉不到)
     status: Mapped[str] = mapped_column(String(16), default="pending", nullable=False)
+    # 博主在 brief 里提到这只票的态度（从 ticker_opinion_log 同步过来）
+    # 'bullish' (看多) / 'bearish' (看空) / 'avoid' (回避) / 'neutral' (中性) / 'unknown' (没提取到)
+    sentiment: Mapped[str] = mapped_column(String(16), default="unknown", nullable=False)
     computed_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
 
     __table_args__ = (
@@ -479,6 +482,14 @@ async def init_db() -> None:
         try:
             await conn.exec_driver_sql(
                 "ALTER TABLE decision_journal ADD COLUMN self_critique TEXT"
+            )
+        except Exception:
+            pass
+        # v0.6: backtest_entries.sentiment — 推荐/看空/中性分类
+        try:
+            await conn.exec_driver_sql(
+                "ALTER TABLE backtest_entries ADD COLUMN sentiment VARCHAR(16) "
+                "NOT NULL DEFAULT 'unknown'"
             )
         except Exception:
             pass

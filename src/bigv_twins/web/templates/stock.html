@@ -138,32 +138,64 @@
   {% endif %}
 </section>
 
-<!-- Backtest records -->
+<!-- Backtest records (按博主情绪分组：推荐 / 看空 / 中性) -->
 {% if backtests %}
+{% macro bt_table(rows) %}
+<table class="backtest-table">
+  <thead>
+    <tr><th>博主</th><th>提及日</th><th>入场价</th><th>退出价</th><th>个股收益</th><th>超额</th><th>判定</th></tr>
+  </thead>
+  <tbody>
+    {% for bt in rows %}
+    <tr>
+      <td>{{ bt.blogger_name }}</td>
+      <td>{{ bt.entry_date }}</td>
+      <td>{{ "%.2f"|format(bt.entry_price) if bt.entry_price else "—" }}</td>
+      <td>{{ "%.2f"|format(bt.exit_price) if bt.exit_price else "—" }}</td>
+      <td class="{% if bt.ticker_return and bt.ticker_return > 0 %}up{% elif bt.ticker_return and bt.ticker_return < 0 %}down{% endif %}">
+        {{ "%+.1f%%"|format(bt.ticker_return) if bt.ticker_return else "—" }}
+      </td>
+      <td class="{% if bt.excess_return and bt.excess_return > 0 %}up{% elif bt.excess_return and bt.excess_return < 0 %}down{% endif %}">
+        {{ "%+.1f%%"|format(bt.excess_return) if bt.excess_return else "—" }}
+      </td>
+      <td>
+        {% if bt.status == "complete" %}
+          {% if bt.hit %}<span style="color:#2e7d32">✓ 准</span>{% else %}<span style="color:#c62828">✗ 错</span>{% endif %}
+        {% else %}{{ bt.status }}{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endmacro %}
+
+{% set bt_bullish = backtests | selectattr("sentiment", "equalto", "bullish") | list %}
+{% set bt_bearish = backtests | selectattr("sentiment", "in", ["bearish", "avoid"]) | list %}
+{% set bt_neutral = backtests | rejectattr("sentiment", "in", ["bullish", "bearish", "avoid"]) | list %}
 <section class="stock-section">
-  <h3>📈 回测记录</h3>
-  <table class="backtest-table">
-    <thead>
-      <tr><th>博主</th><th>提及日</th><th>入场价</th><th>退出价</th><th>个股收益</th><th>超额</th><th>状态</th></tr>
-    </thead>
-    <tbody>
-      {% for bt in backtests %}
-      <tr>
-        <td>{{ bt.blogger_name }}</td>
-        <td>{{ bt.entry_date }}</td>
-        <td>{{ "%.2f"|format(bt.entry_price) if bt.entry_price else "—" }}</td>
-        <td>{{ "%.2f"|format(bt.exit_price) if bt.exit_price else "—" }}</td>
-        <td class="{% if bt.ticker_return and bt.ticker_return > 0 %}up{% elif bt.ticker_return and bt.ticker_return < 0 %}down{% endif %}">
-          {{ "%+.1f%%"|format(bt.ticker_return) if bt.ticker_return else "—" }}
-        </td>
-        <td class="{% if bt.excess_return and bt.excess_return > 0 %}up{% elif bt.excess_return and bt.excess_return < 0 %}down{% endif %}">
-          {{ "%+.1f%%"|format(bt.excess_return) if bt.excess_return else "—" }}
-        </td>
-        <td>{{ bt.status }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <h3>📈 博主回测记录</h3>
+  <p class="muted" style="font-size:0.8rem; margin-top:-0.3rem">
+    博主在日报里提到此票之后 14 天 vs 沪深300 的相对表现。按"推荐 / 看空 / 中性"分开看 —
+    推荐的看跑赢算赢，看空/避雷的看跑输算赢。
+  </p>
+
+  {% if bt_bullish %}
+  <h4 style="margin-top:1rem">🟢 推荐（看多）— {{ bt_bullish|length }} 次</h4>
+  {{ bt_table(bt_bullish) }}
+  {% endif %}
+
+  {% if bt_bearish %}
+  <h4 style="margin-top:1rem">🔴 看空 / 回避 — {{ bt_bearish|length }} 次</h4>
+  <p class="muted" style="font-size:0.75rem; margin-top:-0.3rem">超额为负 = 标的跑输 = 博主判断正确</p>
+  {{ bt_table(bt_bearish) }}
+  {% endif %}
+
+  {% if bt_neutral %}
+  <details style="margin-top:1rem">
+    <summary>⚪ 中性提及 / 情绪未提取 — {{ bt_neutral|length }} 次（点击展开）</summary>
+    {{ bt_table(bt_neutral) }}
+  </details>
+  {% endif %}
 </section>
 {% endif %}
 

@@ -149,6 +149,8 @@ async def stock_page(
             "ticker_return": bt.ticker_return,
             "benchmark_return": bt.benchmark_return,
             "excess_return": bt.excess_return,
+            "sentiment": bt.sentiment,
+            "hit": bt.hit,
             "status": "complete" if bt.exit_price else "pending",
         })
 

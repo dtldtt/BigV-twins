@@ -150,6 +150,21 @@ def _get_close_on_or_after(df, target_date: str) -> tuple[str, float] | None:
 # ============================================================================
 
 
+async def _lookup_sentiment(blogger_slug: str, brief_date: str, ticker: str) -> str:
+    """从 ticker_opinion_log 查这条提及的情绪标签，没有就 'unknown'。"""
+    from .db import TickerOpinionLog
+    async with db._SessionFactory() as s:
+        row = await s.execute(
+            select(TickerOpinionLog.sentiment)
+            .where(TickerOpinionLog.blogger_slug == blogger_slug)
+            .where(TickerOpinionLog.opinion_date == brief_date)
+            .where(TickerOpinionLog.ticker == ticker)
+            .limit(1)
+        )
+        s_val = row.scalar_one_or_none()
+        return s_val or "unknown"
+
+
 async def compute_one(blogger_slug: str, brief_date: str, ticker: str,
                        window_days: int = DEFAULT_WINDOW,
                        benchmark_df=None) -> dict:
@@ -157,17 +172,22 @@ async def compute_one(blogger_slug: str, brief_date: str, ticker: str,
 
     Returns the computed result dict for telemetry.
     """
+    # 查情绪（bullish/bearish/neutral/avoid/unknown）— 用来在 /stock 上分类展示
+    sentiment = await _lookup_sentiment(blogger_slug, brief_date, ticker)
+
+    async def upsert(fields: dict):
+        fields.setdefault("sentiment", sentiment)
+        await _upsert(blogger_slug, brief_date, ticker, window_days, fields)
+
     if not _is_a_share(ticker):
         # 港股 / 非 A 股先跳过（akshare 接口不同）
-        await _upsert(blogger_slug, brief_date, ticker, window_days,
-                      {"status": "no_data"})
+        await upsert({"status": "no_data"})
         return {"status": "skip_non_a"}
 
     try:
         entry_dt = datetime.strptime(brief_date, "%Y-%m-%d").date()
     except ValueError:
-        await _upsert(blogger_slug, brief_date, ticker, window_days,
-                      {"status": "no_data"})
+        await upsert({"status": "no_data"})
         return {"status": "bad_date"}
 
     exit_target = entry_dt + timedelta(days=window_days)
@@ -181,14 +201,12 @@ async def compute_one(blogger_slug: str, brief_date: str, ticker: str,
 
     df = await asyncio.to_thread(_fetch_price_hist, ticker, start, end)
     if df is None:
-        await _upsert(blogger_slug, brief_date, ticker, window_days,
-                      {"status": "no_data"})
+        await upsert({"status": "no_data"})
         return {"status": "no_price_data"}
 
     entry = _get_close_on_or_after(df, brief_date)
     if entry is None:
-        await _upsert(blogger_slug, brief_date, ticker, window_days,
-                      {"status": "no_data"})
+        await upsert({"status": "no_data"})
         return {"status": "no_entry_price"}
 
     entry_actual_date, entry_px = entry
@@ -199,16 +217,15 @@ async def compute_one(blogger_slug: str, brief_date: str, ticker: str,
 
     b_entry = _get_close_on_or_after(benchmark_df, brief_date) if benchmark_df is not None else None
     if b_entry is None:
-        await _upsert(blogger_slug, brief_date, ticker, window_days,
-                      {"status": "no_data",
-                       "entry_date_actual": entry_actual_date,
-                       "entry_price": entry_px})
+        await upsert({"status": "no_data",
+                      "entry_date_actual": entry_actual_date,
+                      "entry_price": entry_px})
         return {"status": "no_benchmark"}
 
     # Check if exit window has elapsed
     if exit_target > today:
         # pending
-        await _upsert(blogger_slug, brief_date, ticker, window_days, {
+        await upsert({
             "status": "pending",
             "entry_date_actual": entry_actual_date,
             "entry_price": entry_px,
@@ -221,7 +238,7 @@ async def compute_one(blogger_slug: str, brief_date: str, ticker: str,
     exit = _get_close_on_or_after(df, exit_target_str)
     b_exit = _get_close_on_or_after(benchmark_df, exit_target_str)
     if exit is None or b_exit is None:
-        await _upsert(blogger_slug, brief_date, ticker, window_days, {
+        await upsert({
             "status": "pending",
             "entry_date_actual": entry_actual_date,
             "entry_price": entry_px,
@@ -234,9 +251,13 @@ async def compute_one(blogger_slug: str, brief_date: str, ticker: str,
     ticker_return = (exit_px / entry_px - 1.0) * 100.0
     benchmark_return = (b_exit_px / b_entry[1] - 1.0) * 100.0
     excess = ticker_return - benchmark_return
-    hit = bool(excess > 0)
+    # hit 的语义看情绪：bullish 看超额是否>0；bearish/avoid 看是否<0（避雷成功）
+    if sentiment in ("bearish", "avoid"):
+        hit = bool(excess < 0)
+    else:
+        hit = bool(excess > 0)
 
-    await _upsert(blogger_slug, brief_date, ticker, window_days, {
+    await upsert({
         "status": "complete",
         "entry_date_actual": entry_actual_date,
         "exit_date_actual": exit_actual_date,
@@ -249,7 +270,7 @@ async def compute_one(blogger_slug: str, brief_date: str, ticker: str,
         "excess_return": excess,
         "hit": hit,
     })
-    return {"status": "complete", "excess": excess, "hit": hit}
+    return {"status": "complete", "excess": excess, "hit": hit, "sentiment": sentiment}
 
 
 async def _upsert(blogger_slug: str, brief_date: str, ticker: str,
