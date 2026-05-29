@@ -204,6 +204,8 @@ class UserWatchlist(Base):
     note: Mapped[str | None] = mapped_column(String(200), nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     added_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+    # 'manual' 用户主动加 / 'auto' 系统因为交易加 — 清仓时只删 'auto'
+    added_via: Mapped[str] = mapped_column(String(16), nullable=False, default="manual")
 
     __table_args__ = (
         UniqueConstraint("user_id", "ticker", name="uq_watchlist_user_ticker"),
@@ -346,7 +348,7 @@ class DecisionJournal(Base):
     position_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
     shares: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # User-written decision logic
-    reasoning: Mapped[str] = mapped_column(Text, nullable=False)
+    reasoning: Mapped[str | None] = mapped_column(Text, nullable=True)
     hold_conditions: Mapped[str | None] = mapped_column(Text, nullable=True)
     exit_signals: Mapped[str | None] = mapped_column(Text, nullable=True)
     target_price: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -463,6 +465,14 @@ async def init_db() -> None:
             "ON ticker_daily_brief (ticker, brief_date)",
         ):
             await conn.exec_driver_sql(stmt)
+        # v0.6: user_watchlist.added_via — 区分手动加 vs 交易自动加
+        try:
+            await conn.exec_driver_sql(
+                "ALTER TABLE user_watchlist ADD COLUMN added_via VARCHAR(16) "
+                "NOT NULL DEFAULT 'manual'"
+            )
+        except Exception:
+            pass  # 已经加过
         # FTS5 全站搜索表（trigram tokenizer 支持中文）。Contentless 模式 — 我们
         # 自己管理 INSERT/DELETE，不挂触发器（少耦合）
         await conn.exec_driver_sql("""

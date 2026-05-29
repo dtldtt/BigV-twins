@@ -176,7 +176,8 @@ async def _auto_add_watchlist(user_id: int, ticker: str, ticker_name: str):
         if len(ticker) == 5:
             market = "HK"
         wl = UserWatchlist(
-            user_id=user_id, ticker=ticker, name=ticker_name, market=market, note=""
+            user_id=user_id, ticker=ticker, name=ticker_name, market=market, note="",
+            added_via="auto",
         )
         session.add(wl)
         try:
@@ -327,12 +328,42 @@ async def journal_list(
     notes_rows = await session.execute(notes_q)
     notes = list(notes_rows.scalars())
 
+    # Group journals by ticker for collapsible display
+    from collections import defaultdict
+    grouped: dict[str, list] = defaultdict(list)
+    for j in journals:
+        grouped[j.ticker].append(j)
+    portfolio_by_ticker = {p["ticker"]: p for p in portfolio}
+    ticker_groups = []
+    for ticker, entries in grouped.items():
+        entries_sorted = sorted(entries, key=lambda x: x.created_at, reverse=True)
+        latest = entries_sorted[0]
+        any_active = any(e.status == "active" for e in entries)
+        p = portfolio_by_ticker.get(ticker)
+        ticker_groups.append({
+            "ticker": ticker,
+            "ticker_name": latest.ticker_name,
+            "entries": entries_sorted,
+            "trade_count": len(entries),
+            "latest_action": latest.action,
+            "latest_date": latest.created_at,
+            "any_active": any_active,
+            "current_shares": p["shares"] if p else 0,
+            "cost_basis": p["cost_basis"] if p else None,
+            "pnl": p["pnl"] if p else None,
+            "pnl_pct": p["pnl_pct"] if p else None,
+            "current_price": price_map.get(ticker),
+        })
+    # Sort: active first (by latest date desc), then closed (by latest date desc)
+    ticker_groups.sort(key=lambda g: (not g["any_active"], -(g["latest_date"].timestamp() if g["latest_date"] else 0)))
+
     return templates.TemplateResponse(
         request=request,
         name="journal/list.html",
         context={
             "user": user,
             "journals": journals,
+            "ticker_groups": ticker_groups,
             "price_map": price_map,
             "status_filter": status_filter,
             "portfolio": portfolio,
@@ -395,7 +426,7 @@ async def journal_create(
     action: str = Form(...),
     price_at_decision: float = Form(None),
     shares: int = Form(None),
-    reasoning: str = Form(...),
+    reasoning: str = Form(""),
     action_plan: str = Form(""),
     target_price: float = Form(None),
     stop_loss_price: float = Form(None),
@@ -428,7 +459,7 @@ async def journal_create(
         price_at_decision=price_at_decision,
         position_pct=None,
         shares=shares,
-        reasoning=reasoning,
+        reasoning=reasoning or None,
         hold_conditions=None,
         exit_signals=None,
         target_price=target_price,
@@ -518,7 +549,7 @@ async def journal_edit(
     action: str = Form(...),
     price_at_decision: float = Form(None),
     shares: int = Form(None),
-    reasoning: str = Form(...),
+    reasoning: str = Form(""),
     action_plan: str = Form(""),
     target_price: float = Form(None),
     stop_loss_price: float = Form(None),
@@ -583,6 +614,17 @@ async def journal_close(
         j.closed_at = datetime.now()
         j.closed_price = closed_price
         j.closed_reason = closed_reason or None
+
+    # 清仓后：如果自选股是因为交易自动加的，自动移除；手动加的保留
+    wl_row = await session.execute(
+        select(UserWatchlist).where(
+            UserWatchlist.user_id == user.id,
+            UserWatchlist.ticker == journal.ticker,
+        )
+    )
+    wl = wl_row.scalar_one_or_none()
+    if wl and wl.added_via == "auto":
+        await session.delete(wl)
 
     await session.commit()
     return RedirectResponse("/journal", status_code=303)
