@@ -65,7 +65,8 @@
       {% for p in top_posts %}
         <tr>
           <td><small class="muted">{{ p.content_type }}</small></td>
-          <td><a href="{{ p.url }}" target="_blank" rel="noopener">{{ p.title or "(无标题)" }}</a></td>
+          <td><a href="https://8-155-174-112.nip.io:8000/content/{{ p.id }}" target="_blank" rel="noopener">{{ p.title or "(无标题)" }}</a>
+              <a href="{{ p.url }}" target="_blank" rel="noopener" style="font-size:0.7rem; color:#999; margin-left:0.4rem" title="知乎原文（可能已删除）">↗</a></td>
           <td><strong>{{ p.voteup_count }}</strong></td>
           <td><small class="muted">{{ p.created_time[:10] if p.created_time else "—" }}</small></td>
         </tr>
@@ -87,7 +88,8 @@
         <tr>
           <td><small class="muted">{{ p.created_time[:10] if p.created_time else "—" }}</small></td>
           <td><small class="muted">{{ p.content_type }}</small></td>
-          <td><a href="{{ p.url }}" target="_blank" rel="noopener">{{ p.title or "(无标题)" }}</a></td>
+          <td><a href="https://8-155-174-112.nip.io:8000/content/{{ p.id }}" target="_blank" rel="noopener">{{ p.title or "(无标题)" }}</a>
+              <a href="{{ p.url }}" target="_blank" rel="noopener" style="font-size:0.7rem; color:#999; margin-left:0.4rem" title="知乎原文（可能已删除）">↗</a></td>
           <td>{{ p.voteup_count }}</td>
         </tr>
       {% endfor %}

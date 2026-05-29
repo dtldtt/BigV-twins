@@ -107,13 +107,13 @@ async def about_page(
             (blogger.author_id,),
         ).fetchone()
         top_posts = src.execute(
-            "SELECT zhihu_id, content_type, title, voteup_count, url, created_time "
+            "SELECT id, zhihu_id, content_type, title, voteup_count, url, created_time "
             "FROM contents WHERE author_id = ? AND content IS NOT NULL "
             "ORDER BY voteup_count DESC LIMIT 5",
             (blogger.author_id,),
         ).fetchall()
         recent_posts = src.execute(
-            "SELECT zhihu_id, content_type, title, voteup_count, url, created_time "
+            "SELECT id, zhihu_id, content_type, title, voteup_count, url, created_time "
             "FROM contents WHERE author_id = ? AND content IS NOT NULL "
             "ORDER BY created_time DESC LIMIT 10",
             (blogger.author_id,),
