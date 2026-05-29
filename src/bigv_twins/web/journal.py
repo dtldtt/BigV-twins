@@ -409,7 +409,7 @@ async def journal_create_form(
     ticker = request.query_params.get("ticker", "")
     name = request.query_params.get("name", "")
     from datetime import datetime
-    now_iso = datetime.now().strftime("%Y-%m-%dT%H:%M")
+    now_iso = datetime.now().strftime("%Y-%m-%d")
     return templates.TemplateResponse(
         request=request,
         name="journal/create.html",
@@ -456,7 +456,7 @@ async def journal_create(
     if not raw_name:
         raw_name = raw_ticker
 
-    # Parse decision_at (HTML5 datetime-local: "2026-05-29T15:30")
+    # Parse decision_at (HTML5 date: "2026-05-29" → midnight)
     created_at = None
     if decision_at:
         try:
@@ -550,7 +550,7 @@ async def journal_edit_form(
     if not journal or journal.user_id != user.id:
         raise HTTPException(status_code=404)
     decision_at_iso = (
-        journal.created_at.strftime("%Y-%m-%dT%H:%M") if journal.created_at else ""
+        journal.created_at.strftime("%Y-%m-%d") if journal.created_at else ""
     )
     return templates.TemplateResponse(
         request=request,
