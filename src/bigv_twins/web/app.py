@@ -138,6 +138,18 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="赛博大V", lifespan=lifespan)
 
+    # 默认 FastAPI 的 ServerErrorMiddleware 会吞掉 traceback 只返回 generic
+    # 错误页，systemd journal 里就看不到具体哪一行炸了（之前 /stock/603369
+    # 的 AttributeError 就是这么藏起来一年的）。这里手动 logger.exception
+    # 把 traceback 打到 stderr → journalctl 看得到。
+    @app.exception_handler(Exception)
+    async def log_and_reraise(request: Request, exc: Exception):
+        from fastapi.responses import PlainTextResponse
+        logging.getLogger("bigv_twins.web").exception(
+            "unhandled exception on %s %s", request.method, request.url.path
+        )
+        return PlainTextResponse("Internal Server Error", status_code=500)
+
     app.add_middleware(
         SessionMiddleware,
         secret_key=settings.web_secret_key,
