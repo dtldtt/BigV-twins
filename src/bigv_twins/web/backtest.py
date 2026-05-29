@@ -8,7 +8,10 @@
     → 对每只 ticker 算 30 天前/后股价 vs 沪深300
     → 写入 backtest_entries 表 (UPSERT)
 
-价格源：akshare.stock_zh_a_hist(symbol, period='daily', adjust='hfq')
+价格源：akshare.stock_zh_a_hist(symbol, period='daily', adjust='')  # 用原始市场价
+  之前用过 'hfq'（后复权），导致 /stock 页面显示的 entry/exit 价比真实
+  市场价高几倍（hfq 会把历史价格按累计分红 forward-adjust）。14 天窗口
+  内分红极少见，用原始价对收益率几乎没影响，对用户更直观。
 基准：akshare.index_zh_a_hist(symbol='000300') 沪深300
 
 调度：每天 03:50 跑（blogger_brief_daily 03:30 之后）
@@ -61,19 +64,27 @@ _price_cache: dict[tuple[str, str, str], object] = {}
 
 
 def _fetch_price_hist(ticker: str, start_yyyymmdd: str, end_yyyymmdd: str):
-    """Fetch daily OHLCV via akshare (后复权)。返回 DataFrame 或 None。"""
+    """Fetch daily OHLCV via akshare（原始市场价）。返回 DataFrame 或 None。
+
+    EastMoney 后端容易在密集请求时回 RemoteDisconnected；带 3 次指数退避重试。
+    """
     key = (ticker, start_yyyymmdd, end_yyyymmdd)
     if key in _price_cache:
         return _price_cache[key]
-    try:
-        import akshare as ak
-        df = ak.stock_zh_a_hist(symbol=ticker, period="daily",
-                                start_date=start_yyyymmdd, end_date=end_yyyymmdd,
-                                adjust="hfq")
-    except Exception as e:
-        log.warning("stock_zh_a_hist(%s) failed: %s", ticker, e)
-        _price_cache[key] = None
-        return None
+    import akshare as ak
+    df = None
+    for attempt in range(3):
+        try:
+            df = ak.stock_zh_a_hist(symbol=ticker, period="daily",
+                                    start_date=start_yyyymmdd, end_date=end_yyyymmdd,
+                                    adjust="")
+            break
+        except Exception as e:
+            if attempt == 2:
+                log.warning("stock_zh_a_hist(%s) failed after 3 tries: %s", ticker, e)
+                _price_cache[key] = None
+                return None
+            time.sleep(0.3 * (2 ** attempt))  # 0.3s, 0.6s
     if df is None or len(df) == 0:
         _price_cache[key] = None
         return None
