@@ -92,7 +92,7 @@
   {% else %}
     {% set ms_data = ms %}
   {% endif %}
-  {% if ms_data.get("__master_wisdom") if ms_data is mapping else false %}
+  {% if ms_data is mapping and ms_data.get("__master_wisdom") %}
   <section class="detail-section">
     <h3>📚 大师相关智慧</h3>
     {% for w in ms_data["__master_wisdom"] %}
