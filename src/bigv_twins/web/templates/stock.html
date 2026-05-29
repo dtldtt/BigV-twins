@@ -154,10 +154,10 @@
         <td>{{ "%.2f"|format(bt.entry_price) if bt.entry_price else "—" }}</td>
         <td>{{ "%.2f"|format(bt.exit_price) if bt.exit_price else "—" }}</td>
         <td class="{% if bt.ticker_return and bt.ticker_return > 0 %}up{% elif bt.ticker_return and bt.ticker_return < 0 %}down{% endif %}">
-          {{ "%+.1f%%"|format(bt.ticker_return * 100) if bt.ticker_return else "—" }}
+          {{ "%+.1f%%"|format(bt.ticker_return) if bt.ticker_return else "—" }}
         </td>
         <td class="{% if bt.excess_return and bt.excess_return > 0 %}up{% elif bt.excess_return and bt.excess_return < 0 %}down{% endif %}">
-          {{ "%+.1f%%"|format(bt.excess_return * 100) if bt.excess_return else "—" }}
+          {{ "%+.1f%%"|format(bt.excess_return) if bt.excess_return else "—" }}
         </td>
         <td>{{ bt.status }}</td>
       </tr>
