@@ -369,6 +369,8 @@ class DecisionJournal(Base):
     # Review scheduling
     next_review_at: Mapped[str | None] = mapped_column(String(10), nullable=True)
     review_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    # 用户事后自评（多次追加，自动按 "[M月D日 追加评价] ..." 拼接）
+    self_critique: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     user: Mapped[User] = relationship()
 
@@ -473,6 +475,13 @@ async def init_db() -> None:
             )
         except Exception:
             pass  # 已经加过
+        # v0.6: decision_journal.self_critique — 用户事后自评
+        try:
+            await conn.exec_driver_sql(
+                "ALTER TABLE decision_journal ADD COLUMN self_critique TEXT"
+            )
+        except Exception:
+            pass
         # FTS5 全站搜索表（trigram tokenizer 支持中文）。Contentless 模式 — 我们
         # 自己管理 INSERT/DELETE，不挂触发器（少耦合）
         await conn.exec_driver_sql("""

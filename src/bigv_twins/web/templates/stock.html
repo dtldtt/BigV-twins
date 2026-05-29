@@ -89,24 +89,61 @@
 <section class="stock-section">
   <h3>📝 我的操作记录 ({{ journal_entries|length }}条)</h3>
   {% if journal_entries %}
+  {% set redirect_url = "/stock/" ~ ticker %}
   {% for j in journal_entries %}
-  <div class="mention-item">
-    <div class="mention-head">
+  <div class="op-record">
+    <div class="op-head">
       <span class="journal-action journal-action-{{ j.action }}">
         {% if j.action == "open" %}建仓{% elif j.action == "add" %}加仓{% elif j.action == "reduce" %}减仓{% elif j.action == "close" %}清仓{% elif j.action == "retroactive" %}补录{% endif %}
       </span>
       <span>¥{{ "%.2f"|format(j.price_at_decision) if j.price_at_decision else "—" }}{% if j.shares %} · {{ j.shares }}股{% endif %}</span>
       <small class="muted">{{ j.created_at.strftime("%Y-%m-%d") if j.created_at else "" }}</small>
+      {% if j.target_price or j.stop_loss_price %}
+      <small class="muted">
+        {% if j.target_price %}🎯 ¥{{ "%.2f"|format(j.target_price) }}{% endif %}
+        {% if j.stop_loss_price %} ⛔ ¥{{ "%.2f"|format(j.stop_loss_price) }}{% endif %}
+      </small>
+      {% endif %}
       <a href="/journal/{{ j.id }}" style="margin-left:auto; font-size:0.8rem">详情 →</a>
     </div>
-    {% if j.reasoning %}<p class="mention-excerpt">{{ j.reasoning[:150] }}{% if j.reasoning|length > 150 %}…{% endif %}</p>{% endif %}
-    {% if j.action_detail %}<p class="mention-excerpt" style="color:#888">📋 计划：{{ j.action_detail[:100] }}</p>{% endif %}
-    {% if j.target_price or j.stop_loss_price %}
-    <div style="font-size:0.8rem; color:#888; margin-top:0.2rem">
-      {% if j.target_price %}🎯 目标 ¥{{ "%.2f"|format(j.target_price) }}{% endif %}
-      {% if j.stop_loss_price %} · ⛔ 止损 ¥{{ "%.2f"|format(j.stop_loss_price) }}{% endif %}
+
+    <div class="op-field">
+      <span class="op-field-label">💡 思路</span>
+      <span class="op-field-value">{{ j.reasoning if j.reasoning else '（空）' }}</span>
+      <details class="op-field-edit"><summary>✏️</summary>
+        <form method="post" action="/journal/{{ j.id }}/quick-edit" class="op-edit-form">
+          <input type="hidden" name="field" value="reasoning">
+          <input type="hidden" name="redirect_to" value="{{ redirect_url }}">
+          <textarea name="value" rows="2" placeholder="当时为什么这么操作？">{{ j.reasoning or '' }}</textarea>
+          <button type="submit">保存</button>
+        </form>
+      </details>
     </div>
-    {% endif %}
+
+    <div class="op-field">
+      <span class="op-field-label">📋 计划</span>
+      <span class="op-field-value">{{ j.action_detail if j.action_detail else '（空）' }}</span>
+      <details class="op-field-edit"><summary>✏️</summary>
+        <form method="post" action="/journal/{{ j.id }}/quick-edit" class="op-edit-form">
+          <input type="hidden" name="field" value="action_plan">
+          <input type="hidden" name="redirect_to" value="{{ redirect_url }}">
+          <textarea name="value" rows="2" placeholder="后续什么时候加仓/减仓/清仓">{{ j.action_detail or '' }}</textarea>
+          <button type="submit">保存</button>
+        </form>
+      </details>
+    </div>
+
+    <div class="op-field op-critique">
+      <span class="op-field-label">💬 评价</span>
+      <div class="op-field-value">
+        {% if j.self_critique %}<pre class="critique-text">{{ j.self_critique }}</pre>{% else %}（空）{% endif %}
+      </div>
+      <form method="post" action="/journal/{{ j.id }}/critique" class="op-critique-form">
+        <input type="hidden" name="redirect_to" value="{{ redirect_url }}">
+        <input type="text" name="critique" placeholder="以现在的视角，自评一下当时的操作">
+        <button type="submit">{% if j.self_critique %}追加{% else %}保存{% endif %}</button>
+      </form>
+    </div>
   </div>
   {% endfor %}
   {% else %}
@@ -177,5 +214,26 @@
 .journal-action-reduce, .journal-action-close { background:#ffebee; color:#c62828; }
 td.up { color:#e53935; }
 td.down { color:#43a047; }
+
+/* operation record (stock page) */
+.op-record { padding:0.7rem 0.9rem; border:1px solid #e8e8e8; border-radius:6px; margin-bottom:0.7rem; }
+.op-head { display:flex; align-items:center; gap:0.6rem; padding-bottom:0.5rem; border-bottom:1px solid #f0f0f0; margin-bottom:0.4rem; font-size:0.85rem; }
+.op-field { display:grid; grid-template-columns:3rem 1fr auto; gap:0.5rem; align-items:start; padding:0.25rem 0; font-size:0.85rem; }
+.op-field-label { color:#888; font-size:0.8rem; }
+.op-field-value { color:#333; white-space:pre-wrap; word-break:break-word; }
+.op-field-value:empty::before, .op-field-value:has(>:empty) { color:#bbb; }
+.op-field-edit { font-size:0.75rem; }
+.op-field-edit summary { cursor:pointer; color:#1565c0; list-style:none; padding:0 0.3rem; }
+.op-field-edit summary::-webkit-details-marker { display:none; }
+.op-field-edit summary:hover { background:#f0f7ff; border-radius:3px; }
+.op-field-edit[open] summary { color:#666; }
+.op-edit-form { margin-top:0.3rem; grid-column:1 / -1; display:flex; gap:0.4rem; align-items:flex-end; }
+.op-edit-form textarea { flex:1; font-size:0.83rem; padding:0.3rem; margin:0; }
+.op-edit-form button { padding:0.3rem 0.8rem; font-size:0.82rem; margin:0; width:auto; }
+.op-critique { border-top:1px solid #f5f5f5; padding-top:0.5rem; margin-top:0.3rem; }
+.op-critique-form { grid-column:1 / -1; display:flex; gap:0.4rem; margin-top:0.3rem; }
+.op-critique-form input[type=text] { flex:1; font-size:0.83rem; padding:0.3rem; margin:0; }
+.op-critique-form button { padding:0.3rem 0.8rem; font-size:0.82rem; margin:0; width:auto; }
+.critique-text { font-family:inherit; font-size:0.83rem; white-space:pre-wrap; margin:0; padding:0.4rem 0.6rem; background:#fffdf6; border-left:3px solid #ffd54f; border-radius:0 3px 3px 0; }
 </style>
 {% endblock %}

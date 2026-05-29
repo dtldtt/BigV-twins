@@ -597,6 +597,59 @@ async def journal_edit(
     await session.commit()
     return RedirectResponse(f"/journal/{jid}", status_code=303)
 
+
+@router.post("/{jid}/quick-edit")
+async def journal_quick_edit(
+    request: Request,
+    jid: int,
+    user: Annotated[User, Depends(auth.require_user)],
+    session: Annotated[AsyncSession, Depends(db.get_session)],
+    field: str = Form(...),  # 'reasoning' or 'action_plan'
+    value: str = Form(""),
+    redirect_to: str = Form("/journal"),
+):
+    """单字段快速编辑（思路/计划），用于 /stock 等页面 inline 编辑。"""
+    journal = await session.get(DecisionJournal, jid)
+    if not journal or journal.user_id != user.id:
+        raise HTTPException(status_code=404)
+    cleaned = value.strip() or None
+    if field == "reasoning":
+        journal.reasoning = cleaned
+    elif field == "action_plan":
+        journal.action_detail = cleaned
+    else:
+        raise HTTPException(status_code=400, detail="unknown field")
+    await session.commit()
+    return RedirectResponse(redirect_to, status_code=303)
+
+
+@router.post("/{jid}/critique")
+async def journal_critique(
+    request: Request,
+    jid: int,
+    user: Annotated[User, Depends(auth.require_user)],
+    session: Annotated[AsyncSession, Depends(db.get_session)],
+    critique: str = Form(...),
+    redirect_to: str = Form("/journal"),
+):
+    """追加一条自评，自动按 "[M月D日 追加评价] ..." 拼接到 self_critique。"""
+    journal = await session.get(DecisionJournal, jid)
+    if not journal or journal.user_id != user.id:
+        raise HTTPException(status_code=404)
+    new_text = critique.strip()
+    if not new_text:
+        return RedirectResponse(redirect_to, status_code=303)
+    from datetime import date
+    today = date.today()
+    if journal.self_critique:
+        prefix = f"[{today.month}月{today.day}日 追加评价] "
+        journal.self_critique = journal.self_critique + "\n\n" + prefix + new_text
+    else:
+        journal.self_critique = new_text
+    await session.commit()
+    return RedirectResponse(redirect_to, status_code=303)
+
+
 @router.post("/{jid}/close")
 async def journal_close(
     jid: int,
