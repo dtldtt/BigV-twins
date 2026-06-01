@@ -35,6 +35,8 @@ SNAPSHOT_TTL_S = 600    # 10 min
 NAME_MAP_TTL_S = 3600   # 1 hour
 NAME_MAP_DISK_TTL_S = 86400 * 3  # 3 天内的磁盘缓存直接信任
 _NAME_MAP_DISK_PATH = Path("/tmp/bigv_a_share_names.csv")
+_ETF_NAME_MAP_CACHE: dict[str, Any] = {"ts": 0.0, "df": None}
+_ETF_NAME_MAP_DISK_PATH = Path("/tmp/bigv_etf_names.csv")
 
 
 # ----- ticker resolution ---------------------------------------------
@@ -123,6 +125,48 @@ def _load_name_map():
     return None
 
 
+def _load_etf_name_map():
+    """code→name for ETF lookups（fund_etf_spot_em 给的是 ETF 实时表）。
+
+    跟 _load_name_map 同样的三层缓存。**之前 ETF 代码走 _load_name_map
+    会查不到（A 股个股表不含 ETF），导致 name 退化成代码本身，AI 投顾就
+    凭代码瞎猜名字 — bug 根源。**
+    """
+    now = time.time()
+    if _ETF_NAME_MAP_CACHE["df"] is not None and now - _ETF_NAME_MAP_CACHE["ts"] < NAME_MAP_TTL_S:
+        return _ETF_NAME_MAP_CACHE["df"]
+
+    if _ETF_NAME_MAP_DISK_PATH.exists():
+        try:
+            mtime = _ETF_NAME_MAP_DISK_PATH.stat().st_mtime
+            if now - mtime < NAME_MAP_DISK_TTL_S:
+                import pandas as pd
+                df = pd.read_csv(_ETF_NAME_MAP_DISK_PATH, dtype={"code": str})
+                _ETF_NAME_MAP_CACHE["df"] = df
+                _ETF_NAME_MAP_CACHE["ts"] = mtime
+                return df
+        except Exception as e:
+            log.warning("etf name map disk read failed: %s", e)
+
+    import akshare as ak
+    for attempt in range(3):
+        try:
+            raw = ak.fund_etf_spot_em()  # 列：代码 / 名称 / 最新价 / ...
+            df = raw[["代码", "名称"]].rename(columns={"代码": "code", "名称": "name"})
+            df["code"] = df["code"].astype(str)
+            _ETF_NAME_MAP_CACHE["df"] = df
+            _ETF_NAME_MAP_CACHE["ts"] = now
+            try:
+                df.to_csv(_ETF_NAME_MAP_DISK_PATH, index=False)
+            except Exception as e:
+                log.warning("etf name map disk write failed: %s", e)
+            return df
+        except Exception as e:
+            log.warning("etf name map fetch attempt %d failed: %s", attempt + 1, e)
+            time.sleep(1)
+    return None
+
+
 def resolve_ticker(query: str) -> Optional[TickerInfo]:
     query = (query or "").strip()
     if not query:
@@ -130,13 +174,22 @@ def resolve_ticker(query: str) -> Optional[TickerInfo]:
 
     # pure 6-digit A-share code (includes ETF)
     if re.fullmatch(r"\d{6}", query):
-        df = _load_name_map()
+        is_etf = _is_etf(query)
+        # ETF 必须查 ETF 名单（_load_name_map 是个股表，没有 ETF）
         name = query
-        if df is not None:
-            row = df[df["code"] == query]
-            if not row.empty:
-                name = row.iloc[0]["name"]
-        board = "etf" if _is_etf(query) else _a_share_board(query)
+        if is_etf:
+            etf_df = _load_etf_name_map()
+            if etf_df is not None:
+                row = etf_df[etf_df["code"] == query]
+                if not row.empty:
+                    name = row.iloc[0]["name"]
+        else:
+            df = _load_name_map()
+            if df is not None:
+                row = df[df["code"] == query]
+                if not row.empty:
+                    name = row.iloc[0]["name"]
+        board = "etf" if is_etf else _a_share_board(query)
         return TickerInfo(
             code=query, name=name,
             prefix=_a_share_prefix(query),
