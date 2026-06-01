@@ -570,21 +570,28 @@ async def journal_create(
     expected_hold_period: str = Form(""),
     if_drop_10pct: str = Form(""),
     decision_at: str = Form(""),
+    market_hint: str = Form("a-share"),  # a-share / hk — 决定按名字搜索时去哪个名单
 ):
     # Resolve ticker: ALWAYS normalize to code. ticker_name only stores the name.
     raw_ticker = ticker.strip()
     raw_name = ticker_name.strip()
-    # Try to resolve from either input
-    info = None
-    if raw_ticker:
-        info = resolve_ticker(raw_ticker)
-    if not info and raw_name:
-        info = resolve_ticker(raw_name)
+    # 用户的市场提示：港股的话强制走 HK 解析；A 股 ticker 自动按代码长度判定 ETF
+    if market_hint == "hk":
+        # 港股：直接拿 5 位代码或 .HK 后缀去 resolve
+        info = None
+        if raw_ticker:
+            info = resolve_ticker(raw_ticker)  # 5 位代码会走 HK 分支
+        # 如果用户只填了名字，目前 resolve_ticker 没有港股名→码的反查，
+        # 退化成 raw_name 当代码（多半会失败 — 用户应该填代码）
+    else:
+        info = None
+        if raw_ticker:
+            info = resolve_ticker(raw_ticker)
+        if not info and raw_name:
+            info = resolve_ticker(raw_name)
     if info:
-        # Always use the resolved code as ticker, resolved name as ticker_name
         raw_ticker = info.code
         raw_name = info.name
-    # Fallback: if resolve failed, keep what user typed (don't lose data)
     if not raw_name:
         raw_name = raw_ticker
 
@@ -941,15 +948,20 @@ async def create_note(
     return RedirectResponse("/journal#notes", status_code=303)
 
 
-@router.post("/note/{nid}/delete")
-async def delete_note(
+@router.post("/note/{nid}/edit")
+async def edit_note(
     nid: int,
     user: Annotated[User, Depends(auth.require_user)],
     session: Annotated[AsyncSession, Depends(db.get_session)],
+    content: str = Form(...),
 ):
+    """允许修改随笔内容（改错别字之类）。不允许删除 — 随笔是回测/AI 复盘
+    的素材，删了就丢了。"""
     note = await session.get(InvestmentNote, nid)
     if not note or note.user_id != user.id:
         raise HTTPException(status_code=404)
-    await session.delete(note)
-    await session.commit()
+    cleaned = content.strip()
+    if cleaned:
+        note.content = cleaned
+        await session.commit()
     return RedirectResponse("/journal#notes", status_code=303)

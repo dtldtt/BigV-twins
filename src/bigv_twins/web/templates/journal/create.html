@@ -18,9 +18,18 @@
   <fieldset>
     <legend>标的与操作</legend>
     <div class="form-row">
+      <label style="grid-column:1/-1">
+        市场 *
+        <div class="market-radio">
+          <label class="market-opt"><input type="radio" name="market_hint" value="a-share" checked> 🇨🇳 A 股（含股票 / ETF）</label>
+          <label class="market-opt"><input type="radio" name="market_hint" value="hk"> 🇭🇰 港股</label>
+        </div>
+      </label>
+    </div>
+    <div class="form-row">
       <label>
         股票代码
-        <input type="text" name="ticker" id="ticker-input" value="{{ prefill_ticker }}" placeholder="如 601088 / 510300 / 00700" maxlength="10">
+        <input type="text" name="ticker" id="ticker-input" value="{{ prefill_ticker }}" placeholder="A股: 601088 / ETF: 510300 / 港股: 00700" maxlength="10">
       </label>
       <label>
         股票名称
@@ -139,5 +148,8 @@ sel.addEventListener('change', function() {
 .journal-form fieldset { margin-bottom:1.5rem; }
 .journal-form legend { font-weight:bold; font-size:1rem; }
 .form-row { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:1rem; }
+.market-radio { display:flex; gap:1rem; padding:0.4rem 0; }
+.market-opt { display:flex !important; align-items:center; gap:0.4rem; cursor:pointer; font-weight:normal !important; }
+.market-opt input[type=radio] { margin:0 !important; width:auto !important; }
 </style>
 {% endblock %}

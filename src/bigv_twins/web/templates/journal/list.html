@@ -190,12 +190,17 @@
 
   <!-- Notes list（淡黄色框 + 日期前缀 + 月度/年度归档） -->
   {% macro render_note(n) %}
-    <div class="note-item">
+    <div class="note-item" data-note-id="{{ n.id }}">
       <span class="note-date">{{ n.created_at.strftime("%Y-%m-%d") if n.created_at else "" }}</span>
-      <div class="note-content md-rendered">{{ n.content }}</div>
-      <form method="post" action="/journal/note/{{ n.id }}/delete" style="display:inline; margin:0"
-            onsubmit="return confirm('删除这条随笔？')">
-        <button type="submit" class="note-delete" title="删除">×</button>
+      <div class="note-content md-rendered" data-raw="{{ n.content }}">{{ n.content }}</div>
+      <button type="button" class="note-edit-btn" title="编辑（修订错别字等）"
+              onclick="toggleNoteEdit(this, {{ n.id }})">✏️</button>
+      <form method="post" action="/journal/note/{{ n.id }}/edit" class="note-edit-form" style="display:none">
+        <textarea name="content" rows="3">{{ n.content }}</textarea>
+        <div class="note-edit-actions">
+          <button type="submit" class="note-edit-save">保存</button>
+          <button type="button" class="note-edit-cancel" onclick="toggleNoteEdit(this.closest('.note-item'), {{ n.id }}, true)">取消</button>
+        </div>
       </form>
     </div>
   {% endmacro %}
@@ -280,9 +285,28 @@ document.getElementById('md-preview-toggle')?.addEventListener('click', () => {
 // === 已存随笔渲染：把每条 note-content 用 marked 渲染 ===
 document.querySelectorAll('.note-item .md-rendered').forEach(el => {
   if (!window.marked || !window.DOMPurify) return;
-  const src = el.textContent;
+  const src = el.dataset.raw || el.textContent;
   el.innerHTML = DOMPurify.sanitize(marked.parse(src));
 });
+
+// === 随笔编辑切换 ===
+function toggleNoteEdit(btnOrItem, nid, cancel) {
+  const item = btnOrItem.closest ? btnOrItem.closest('.note-item') : btnOrItem;
+  const content = item.querySelector('.note-content');
+  const editBtn = item.querySelector('.note-edit-btn');
+  const form = item.querySelector('.note-edit-form');
+  const isEditing = form.style.display === 'block';
+  if (isEditing || cancel) {
+    form.style.display = 'none';
+    content.style.display = '';
+    editBtn.style.display = '';
+  } else {
+    form.style.display = 'block';
+    content.style.display = 'none';
+    editBtn.style.display = 'none';
+    form.querySelector('textarea').focus();
+  }
+}
 </script>
 
 <style>
@@ -327,8 +351,13 @@ document.querySelectorAll('.note-item .md-rendered').forEach(el => {
 .note-item { display:flex; gap:0.7rem; align-items:flex-start; padding:0.6rem 0.8rem; background:#fffbe8; border:1px solid #f5e6a3; border-radius:6px; }
 .note-date { color:#7a5c00; font-family:'SF Mono','Consolas',monospace; font-size:0.78rem; flex-shrink:0; min-width:5.5rem; padding-top:0.15rem; }
 .note-content { flex:1; line-height:1.6; font-size:0.88rem; min-width:0; }
-.note-delete { background:none; border:none; color:#bbb; font-size:1.1rem; cursor:pointer; padding:0 0.3rem; line-height:1; flex-shrink:0; margin:0 !important; width:auto !important; }
-.note-delete:hover { color:#c62828; }
+.note-edit-btn { background:none; border:none; color:#bbb; font-size:0.95rem; cursor:pointer; padding:0 0.3rem; line-height:1; flex-shrink:0; margin:0 !important; width:auto !important; }
+.note-edit-btn:hover { color:#1565c0; }
+.note-edit-form { width:100%; margin-top:0.3rem; }
+.note-edit-form textarea { width:100%; font-size:0.88rem; font-family:inherit; padding:0.4rem; }
+.note-edit-actions { display:flex; gap:0.4rem; margin-top:0.3rem; }
+.note-edit-actions button { padding:0.2rem 0.7rem !important; font-size:0.8rem !important; margin:0 !important; width:auto !important; }
+.note-edit-cancel { background:#eee !important; color:#444 !important; }
 .notes-archive { margin-bottom:0.4rem; border:1px solid #eee; border-radius:6px; }
 .notes-archive > summary { cursor:pointer; padding:0.5rem 0.8rem; font-size:0.88rem; color:#555; list-style:none; }
 .notes-archive > summary::-webkit-details-marker { display:none; }
