@@ -98,9 +98,11 @@
       <summary class="ticker-card-head">
         <div class="tc-title-row">
           <span class="tc-arrow">▶</span>
-          <strong class="tc-name">{{ c.ticker_name }}</strong>
-          <code class="tc-code">{{ c.ticker }}</code>
-          <a href="/stock/{{ c.ticker }}" class="tc-detail">详情 →</a>
+          <a href="/stock/{{ c.ticker }}" class="tc-name-link" onclick="event.stopPropagation()">
+            <strong class="tc-name">{{ c.ticker_name }}</strong>
+            <code class="tc-code">{{ c.ticker }}</code>
+          </a>
+          <a href="/stock/{{ c.ticker }}" class="tc-detail-btn" onclick="event.stopPropagation()">📊 详情</a>
         </div>
         <div class="tc-summary-row">
           {% if c.any_active %}
@@ -186,22 +188,49 @@
     <button type="submit" class="capital-btn" style="margin-top:0.3rem">记录</button>
   </form>
 
-  <!-- Notes list -->
-  {% if notes %}
-  <div class="notes-list">
-    {% for n in notes %}
+  <!-- Notes list（淡黄色框 + 日期前缀 + 月度/年度归档） -->
+  {% macro render_note(n) %}
     <div class="note-item">
-      <div class="note-content md-rendered" data-md-source="{{ n.content }}">{{ n.content }}</div>
-      <div class="note-meta">
-        <small class="muted">{{ n.created_at.strftime("%Y-%m-%d %H:%M") if n.created_at else "" }}</small>
-        <form method="post" action="/journal/note/{{ n.id }}/delete" style="display:inline; margin:0"
-              onsubmit="return confirm('删除这条随笔？')">
-          <button type="submit" style="background:none; border:none; color:#999; font-size:0.75rem; cursor:pointer; padding:0">删除</button>
-        </form>
-      </div>
+      <span class="note-date">{{ n.created_at.strftime("%Y-%m-%d") if n.created_at else "" }}</span>
+      <div class="note-content md-rendered">{{ n.content }}</div>
+      <form method="post" action="/journal/note/{{ n.id }}/delete" style="display:inline; margin:0"
+            onsubmit="return confirm('删除这条随笔？')">
+        <button type="submit" class="note-delete" title="删除">×</button>
+      </form>
     </div>
-    {% endfor %}
+  {% endmacro %}
+
+  {% if current_notes %}
+  <div class="notes-current">
+    {% for n in current_notes %}{{ render_note(n) }}{% endfor %}
   </div>
+  {% endif %}
+
+  {% for label, ns in notes_month_sections %}
+  <details class="notes-archive notes-archive-month">
+    <summary>📅 {{ label }} <span class="muted">（{{ ns|length }} 篇）</span></summary>
+    <div class="notes-current">
+      {% for n in ns %}{{ render_note(n) }}{% endfor %}
+    </div>
+  </details>
+  {% endfor %}
+
+  {% for ys in notes_year_sections %}
+  <details class="notes-archive notes-archive-year">
+    <summary>🗓 {{ ys.year }} 全年 <span class="muted">（{{ ys.total }} 篇）</span></summary>
+    {% for label, ns in ys.months %}
+    <details class="notes-archive notes-archive-submonth">
+      <summary>📅 {{ label }} <span class="muted">（{{ ns|length }} 篇）</span></summary>
+      <div class="notes-current">
+        {% for n in ns %}{{ render_note(n) }}{% endfor %}
+      </div>
+    </details>
+    {% endfor %}
+  </details>
+  {% endfor %}
+
+  {% if not current_notes and not notes_month_sections and not notes_year_sections %}
+  <p class="muted" style="text-align:center; padding:2rem">还没有随笔。试试上面的输入框。</p>
   {% endif %}
 </section>
 
@@ -271,10 +300,20 @@ document.querySelectorAll('.note-item .md-rendered').forEach(el => {
 .capital-label { font-size:0.85rem; white-space:nowrap; }
 .up { color:#e53935; }
 .down { color:#43a047; }
-.notes-list { display:flex; flex-direction:column; gap:0.5rem; }
-.note-item { padding:0.7rem 1rem; background:#fafafa; border-radius:6px; border-left:3px solid #e0e0e0; }
-.note-content { font-size:0.9rem; line-height:1.6; }
-.note-meta { display:flex; justify-content:space-between; align-items:center; margin-top:0.4rem; }
+.notes-current { display:flex; flex-direction:column; gap:0.4rem; margin-bottom:0.6rem; }
+.note-item { display:flex; gap:0.7rem; align-items:flex-start; padding:0.6rem 0.8rem; background:#fffbe8; border:1px solid #f5e6a3; border-radius:6px; }
+.note-date { color:#7a5c00; font-family:'SF Mono','Consolas',monospace; font-size:0.78rem; flex-shrink:0; min-width:5.5rem; padding-top:0.15rem; }
+.note-content { flex:1; line-height:1.6; font-size:0.88rem; min-width:0; }
+.note-delete { background:none; border:none; color:#bbb; font-size:1.1rem; cursor:pointer; padding:0 0.3rem; line-height:1; flex-shrink:0; margin:0 !important; width:auto !important; }
+.note-delete:hover { color:#c62828; }
+.notes-archive { margin-bottom:0.4rem; border:1px solid #eee; border-radius:6px; }
+.notes-archive > summary { cursor:pointer; padding:0.5rem 0.8rem; font-size:0.88rem; color:#555; list-style:none; }
+.notes-archive > summary::-webkit-details-marker { display:none; }
+.notes-archive > summary::before { content:'▶ '; font-size:0.7rem; color:#888; margin-right:0.3rem; }
+.notes-archive[open] > summary::before { content:'▼ '; }
+.notes-archive[open] > summary { background:#fafafa; border-bottom:1px solid #eee; }
+.notes-archive .notes-current,
+.notes-archive .notes-archive { padding:0.5rem 0.8rem; }
 
 /* Markdown 工具栏 */
 .md-toolbar { display:flex; gap:0.2rem; padding:0.3rem 0.5rem; background:#f5f5f5; border:1px solid #ddd; border-bottom:none; border-radius:4px 4px 0 0; align-items:center; }
@@ -315,8 +354,10 @@ document.querySelectorAll('.note-item .md-rendered').forEach(el => {
 .tc-arrow { font-size:0.7rem; color:#888; transition:transform 0.15s; display:inline-block; }
 .tc-name { font-size:0.95rem; }
 .tc-code { font-size:0.78rem; color:#666; }
-.tc-detail { margin-left:auto; font-size:0.8rem; color:#1565c0; text-decoration:none; }
-.tc-detail:hover { text-decoration:underline; }
+.tc-name-link { text-decoration:none; color:inherit; display:inline-flex; align-items:center; gap:0.5rem; }
+.tc-name-link:hover .tc-name { color:#1565c0; text-decoration:underline; }
+.tc-detail-btn { margin-left:auto; font-size:0.78rem; color:white !important; background:#1565c0; padding:0.25rem 0.7rem; border-radius:4px; text-decoration:none; white-space:nowrap; }
+.tc-detail-btn:hover { background:#0d47a1; }
 .tc-body { padding:0.5rem 1rem 0.7rem; }
 .tc-summary-row { display:flex; flex-wrap:wrap; gap:0.7rem 1rem; font-size:0.85rem; padding-left:1.4rem; }
 .tc-trade-count { font-size:0.75rem; margin-left:auto; }

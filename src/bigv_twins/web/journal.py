@@ -326,12 +326,42 @@ async def journal_list(
     if total_capital and total_pnl:
         display_capital = total_capital + total_pnl / 10000
 
-    # 投资随笔
+    # 投资随笔（拉全部，模板按时间归档）
     notes_q = select(InvestmentNote).where(
         InvestmentNote.user_id == user.id
-    ).order_by(InvestmentNote.created_at.desc()).limit(20)
+    ).order_by(InvestmentNote.created_at.desc())
     notes_rows = await session.execute(notes_q)
-    notes = list(notes_rows.scalars())
+    notes_all = list(notes_rows.scalars())
+
+    # 按时间归档：当前月扁平展开；本年其他月份每月一组；跨年的整年一组
+    today = date.today()
+    this_year = today.year
+    this_yyyymm = today.strftime("%Y-%m")
+    current_notes = []
+    month_groups: dict[str, list] = {}  # YYYY-MM -> notes (本年其他月份)
+    year_groups: dict[int, list] = {}    # YYYY -> notes (跨年)
+    for n in notes_all:
+        if not n.created_at:
+            continue
+        ymd = n.created_at.strftime("%Y-%m")
+        if ymd == this_yyyymm:
+            current_notes.append(n)
+        elif n.created_at.year == this_year:
+            month_groups.setdefault(ymd, []).append(n)
+        else:
+            year_groups.setdefault(n.created_at.year, []).append(n)
+
+    # month_groups → 按月份倒序的 list
+    notes_month_sections = sorted(month_groups.items(), key=lambda x: x[0], reverse=True)
+    # year_groups → 每年再按月分组
+    notes_year_sections = []
+    for yr in sorted(year_groups.keys(), reverse=True):
+        ns = year_groups[yr]
+        by_mo: dict[str, list] = {}
+        for n in ns:
+            by_mo.setdefault(n.created_at.strftime("%Y-%m"), []).append(n)
+        sub = sorted(by_mo.items(), key=lambda x: x[0], reverse=True)
+        notes_year_sections.append({"year": yr, "total": len(ns), "months": sub})
 
     # === 给每只 ticker 算卡片显示需要的所有字段 ===
     ticker_cards = []
@@ -426,7 +456,9 @@ async def journal_list(
             "total_pnl": total_pnl,
             "total_pnl_pct": total_pnl_pct,
             "total_realized_pnl": total_realized_pnl,
-            "notes": notes,
+            "current_notes": current_notes,
+            "notes_month_sections": notes_month_sections,
+            "notes_year_sections": notes_year_sections,
         },
     )
 
