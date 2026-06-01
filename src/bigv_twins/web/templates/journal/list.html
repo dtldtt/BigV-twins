@@ -131,17 +131,6 @@
         </div>
       </summary>
       <div class="tc-body">
-        {% if c.latest_review %}
-        <details class="tc-review-block" open>
-          <summary>
-            📋 <strong>最近一次 AI 回顾</strong>
-            <small class="muted">{{ c.latest_review.created_at.strftime("%Y-%m-%d") if c.latest_review.created_at else "" }}</small>
-            <a href="/stock/{{ c.ticker }}#review" onclick="event.stopPropagation()" class="tc-review-link">查看全部 →</a>
-          </summary>
-          <div class="tc-review-md md-rendered" data-raw="{{ c.latest_review.review_report_md or '' }}">{{ c.latest_review.review_report_md or '' }}</div>
-        </details>
-        {% endif %}
-
         <div class="tc-trades">
           {% for j in c.entries|reverse %}
           <div class="tc-trade">
@@ -157,6 +146,17 @@
           </div>
           {% endfor %}
         </div>
+
+        {% if c.latest_review %}
+        <details class="tc-review-block" open>
+          <summary>
+            📋 <strong>最近一次 AI 回顾</strong>
+            <small class="muted">{{ c.latest_review.created_at.strftime("%Y-%m-%d") if c.latest_review.created_at else "" }}</small>
+            <a href="/stock/{{ c.ticker }}#review" onclick="event.stopPropagation()" class="tc-review-link">查看全部 →</a>
+          </summary>
+          <div class="tc-review-md md-rendered" data-raw="{{ c.latest_review.review_report_md or '' }}">{{ c.latest_review.review_report_md or '' }}</div>
+        </details>
+        {% endif %}
       </div>
     </details>
     {% endfor %}
@@ -442,7 +442,7 @@ function toggleNoteEdit(btnOrItem, nid, cancel) {
 .journal-action-dividend { background:#fff8e1; color:#7a5c00; }
 
 /* 最新 AI 回顾（在 /journal 卡片内） */
-.tc-review-block { background:#f8f9fa; border-left:3px solid #1565c0; border-radius:0 6px 6px 0; padding:0.5rem 0.8rem; margin-bottom:0.6rem; }
+.tc-review-block { background:#f8f9fa; border-left:3px solid #1565c0; border-radius:0 6px 6px 0; padding:0.5rem 0.8rem; margin-top:0.7rem; }
 .tc-review-block > summary { cursor:pointer; list-style:none; display:flex; gap:0.6rem; align-items:center; font-size:0.85rem; }
 .tc-review-block > summary::-webkit-details-marker { display:none; }
 .tc-review-link { font-size:0.78rem; color:#1565c0; text-decoration:none; margin-left:auto; }
