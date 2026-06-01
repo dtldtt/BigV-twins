@@ -246,6 +246,13 @@ def _build_portfolio(journals: list, price_map: dict, quote_map: dict,
                 total_cost = 0
                 total_buy_shares = 0
                 total_buy_amount = 0
+            elif j.action == "dividend":
+                # 现金分红：股数不变，cost 减总分红金额（实现盈利）
+                # price_at_decision = 每股派息（元）；shares = 当时持仓股数
+                # 总分红 = price × shares
+                if total_shares > 0 and shares > 0 and price > 0:
+                    div_total = shares * price
+                    total_cost -= div_total
 
         if total_shares <= 0:
             continue
@@ -401,7 +408,11 @@ async def journal_list(
     total_realized_pnl = 0.0
     for ticker, entries in grouped.items():
         # entries 已经按 created_at 升序（DB 查询时排过）
-        any_active = any(e.status == "active" for e in entries)
+        # any_active 只看真实持仓动作，忽略 dividend 入账（dividend 是历史
+        # 事件，即便 ticker 当时已清仓也会被记录）
+        any_active = any(
+            e.status == "active" and e.action != "dividend" for e in entries
+        )
         latest = entries[-1]
 
         # 已实现盈亏（不管 active 还是 closed 都算，因为 closed 周期内可能有 reduce）

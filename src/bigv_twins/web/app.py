@@ -37,6 +37,7 @@ from .growth import router as growth_router
 from .reflection_engine import run_monthly_growth_reports, run_quarterly_growth_reports
 from .timeline import router as timeline_router
 from .review_engine import run_scheduled_reviews
+from .dividend_sync import sync_all_users_dividends
 from .token_usage import refresh_token_usage
 from .ticker_brief import generate_ticker_briefs_for_day
 
@@ -116,6 +117,11 @@ async def lifespan(app: FastAPI):
     # Decision review — daily at 20:00
     scheduler.add_job(run_scheduled_reviews, CronTrigger(hour=20, minute=0),
                       id="decision_review", misfire_grace_time=1800, replace_existing=True)
+
+    # A 股分红自动同步 — 每日 17:30（A 股收盘后），拉每个 user 的所有 A 股 ticker
+    # 历史分红，找持仓期内已实施的事件，自动入账
+    scheduler.add_job(sync_all_users_dividends, CronTrigger(hour=17, minute=30),
+                      id="dividend_sync", misfire_grace_time=3600, replace_existing=True)
 
     # 成长复盘 — 月度（每月 1 号 09:00 跑上月）+ 季度（1/4/7/10 月 1 号 09:30 跑上季）
     scheduler.add_job(run_monthly_growth_reports, CronTrigger(day=1, hour=9, minute=0),
