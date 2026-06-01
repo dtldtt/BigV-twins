@@ -120,20 +120,18 @@
       <span class="op-field-value">{{ j.action_detail if j.action_detail else '（空）' }}</span>
     </div>
 
-    <div class="op-field op-critique">
-      <span class="op-field-label">💬 评价</span>
-      <div class="op-field-value">
-        {% if j.critique_entries %}
-          <div class="critique-list">
-            {% for d, content in j.critique_entries %}
-            <div class="critique-entry">
-              <span class="critique-date">{% if d == "legacy" %}（早期记录）{% else %}{{ d }}{% endif %}</span>
-              <div class="critique-content">{{ content }}</div>
-            </div>
-            {% endfor %}
-          </div>
-        {% else %}（空）{% endif %}
+    <div class="op-critique-section">
+      <div class="op-critique-head">💬 评价{% if not j.critique_entries %} <span class="muted">（空）</span>{% endif %}</div>
+      {% if j.critique_entries %}
+      <div class="critique-list">
+        {% for d, content in j.critique_entries %}
+        <div class="critique-row">
+          <span class="critique-date">{% if d == "legacy" %}早期记录{% else %}{{ d }}{% endif %}</span>
+          <span class="critique-content">{{ content }}</span>
+        </div>
+        {% endfor %}
       </div>
+      {% endif %}
       <form method="post" action="/journal/{{ j.id }}/critique" class="op-critique-form">
         <input type="hidden" name="redirect_to" value="{{ redirect_url }}">
         <input type="text" name="critique" placeholder="以现在的视角，自评一下当时的操作">
@@ -252,13 +250,15 @@ td.down { color:#43a047; }
 .op-field { display:grid; grid-template-columns:3rem 1fr; gap:0.5rem; align-items:start; padding:0.25rem 0; font-size:0.85rem; }
 .op-field-label { color:#888; font-size:0.8rem; }
 .op-field-value { color:#333; white-space:pre-wrap; word-break:break-word; }
-.op-critique { border-top:1px solid #f5f5f5; padding-top:0.5rem; margin-top:0.3rem; }
-.op-critique-form { grid-column:1 / -1; display:flex; gap:0.4rem; margin-top:0.3rem; }
+.op-critique-section { border-top:1px solid #f5f5f5; padding-top:0.5rem; margin-top:0.3rem; }
+.op-critique-head { font-size:0.8rem; color:#888; margin-bottom:0.3rem; }
+.op-critique-form { display:flex; gap:0.4rem; margin-top:0.4rem; }
 .op-critique-form input[type=text] { flex:1; font-size:0.83rem; padding:0.3rem; margin:0; }
 .op-critique-form button { padding:0.3rem 0.8rem; font-size:0.82rem; margin:0; width:auto; }
-.critique-list { display:flex; flex-direction:column; gap:0.5rem; }
-.critique-entry { background:#fffdf6; border-left:3px solid #ffd54f; border-radius:0 3px 3px 0; padding:0.5rem 0.7rem; }
-.critique-date { display:inline-block; font-size:0.72rem; font-weight:600; color:#8c6d00; background:#fff3cd; padding:0.15rem 0.5rem; border-radius:10px; margin-bottom:0.3rem; }
-.critique-content { font-size:0.85rem; color:#333; white-space:pre-wrap; line-height:1.55; }
+.critique-list { display:flex; flex-direction:column; }
+.critique-row { display:flex; gap:0.7rem; align-items:baseline; font-size:0.85rem; padding:0.2rem 0; }
+.critique-row + .critique-row { border-top:1px dotted #eee; }
+.critique-date { color:#888; font-size:0.72rem; font-family:'SF Mono','Consolas',monospace; flex-shrink:0; min-width:5.5rem; }
+.critique-content { color:#333; white-space:pre-wrap; line-height:1.55; flex:1; }
 </style>
 {% endblock %}
