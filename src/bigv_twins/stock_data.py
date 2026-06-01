@@ -38,6 +38,45 @@ _NAME_MAP_DISK_PATH = Path("/tmp/bigv_a_share_names.csv")
 _ETF_NAME_MAP_CACHE: dict[str, Any] = {"ts": 0.0, "df": None}
 _ETF_NAME_MAP_DISK_PATH = Path("/tmp/bigv_etf_names.csv")
 
+# 港股名称缓存：增量式 dict（只在首次解析时拉 Tencent，之后存盘）
+import json as _json
+_HK_NAME_CACHE_PATH = Path("/tmp/bigv_hk_names.json")
+_hk_name_cache: dict[str, str] = {}
+_hk_cache_loaded = False
+
+
+def _hk_lookup_name(code5: str) -> str:
+    """5 位港股代码 → 中文名。失败返回代码本身。带磁盘缓存。"""
+    global _hk_cache_loaded
+    if not _hk_cache_loaded:
+        if _HK_NAME_CACHE_PATH.exists():
+            try:
+                _hk_name_cache.update(_json.loads(_HK_NAME_CACHE_PATH.read_text()))
+            except Exception as e:
+                log.warning("hk name cache load failed: %s", e)
+        _hk_cache_loaded = True
+    if code5 in _hk_name_cache:
+        return _hk_name_cache[code5]
+    # 从 Tencent qt 拉
+    try:
+        r = httpx.get(f"http://qt.gtimg.cn/q=hk{code5}", timeout=5)
+        text = r.content.decode("gbk", errors="replace")
+        if '"' in text:
+            inner = text.split('"', 2)[1]
+            fields = inner.split("~")
+            if len(fields) > 1 and fields[1] and fields[1] != code5:
+                _hk_name_cache[code5] = fields[1]
+                try:
+                    _HK_NAME_CACHE_PATH.write_text(
+                        _json.dumps(_hk_name_cache, ensure_ascii=False)
+                    )
+                except Exception:
+                    pass
+                return fields[1]
+    except Exception as e:
+        log.warning("hk name fetch failed for %s: %s", code5, e)
+    return code5
+
 
 # ----- ticker resolution ---------------------------------------------
 
@@ -56,6 +95,15 @@ class TickerInfo:
     @property
     def xq_symbol(self) -> str:
         return f"{self.prefix.upper()}{self.code}"
+
+    @property
+    def currency(self) -> str:
+        """对应市场的计价货币 — 用于持仓聚合时分币种统计。"""
+        if self.market == "hk":
+            return "HKD"
+        if self.market == "us":
+            return "USD"
+        return "CNY"  # a-share 默认
 
 
 def _a_share_prefix(code: str) -> str:
@@ -200,7 +248,9 @@ def resolve_ticker(query: str) -> Optional[TickerInfo]:
     m = re.fullmatch(r"(\d{4,5})(\.HK)?", query.upper())
     if m:
         code = m.group(1).zfill(5)
-        return TickerInfo(code=code, name=code, prefix="hk", market="hk", board="hk")
+        # 港股名称从 Tencent 查（带磁盘缓存）
+        name = _hk_lookup_name(code)
+        return TickerInfo(code=code, name=name, prefix="hk", market="hk", board="hk")
 
     # US ticker: 1-5 letters (no digits)
     if re.fullmatch(r"[A-Z]{1,5}", query.upper()):

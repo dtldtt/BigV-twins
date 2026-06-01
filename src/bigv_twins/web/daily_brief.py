@@ -235,9 +235,20 @@ def get_watchlist_quotes(watchlist_items: Iterable) -> list[dict]:
     for w in items_list:
         sym = ticker_to_sym.get(w.ticker)
         cached = sym_to_cached.get(sym) if sym else None
+        # 币种推断：sym 以 hk 开头 → HKD；以 us 开头 → USD；其他 CNY
+        if sym and sym.startswith("hk"):
+            currency = "HKD"
+        elif sym and sym.startswith("us"):
+            currency = "USD"
+        else:
+            currency = "CNY"
+        # name 优先用 Tencent 实时返回的（更准），fall back 到用户提供的 w.name
+        live_name = (cached or {}).get("name")
+        display_name = live_name if (live_name and live_name != w.ticker) else w.name
         if cached:
             out.append({
-                "ticker": w.ticker, "name": w.name, "market": w.market,
+                "ticker": w.ticker, "name": display_name, "market": w.market,
+                "currency": currency,
                 "note": w.note, "wid": w.id,
                 "current": cached["current"],
                 "change_pct": cached["change_pct"],
@@ -249,7 +260,8 @@ def get_watchlist_quotes(watchlist_items: Iterable) -> list[dict]:
             })
         else:
             out.append({
-                "ticker": w.ticker, "name": w.name, "market": w.market,
+                "ticker": w.ticker, "name": display_name, "market": w.market,
+                "currency": currency,
                 "note": w.note, "wid": w.id,
                 "current": None, "change_pct": None, "change_amt": None,
                 "ok": False,

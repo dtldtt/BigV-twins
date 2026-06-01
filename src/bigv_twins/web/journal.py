@@ -259,9 +259,17 @@ def _build_portfolio(journals: list, price_map: dict, quote_map: dict,
         pnl_pct = ((cur_price - cost_basis) / cost_basis * 100) if (cur_price and cost_basis) else None
         pct_of_total = (market_value / (total_capital * 10000) * 100) if (market_value and total_capital) else None
 
+        # 币种由 quote 决定（quote dict 里有 "currency"），fallback 用 resolve_ticker
+        currency = (quote_map.get(ticker) or {}).get("currency")
+        if not currency:
+            from bigv_twins.stock_data import resolve_ticker
+            info = resolve_ticker(ticker)
+            currency = info.currency if info else "CNY"
+
         portfolio.append({
             "ticker": ticker,
             "name": ticker_name_map.get(ticker, ticker),
+            "currency": currency,
             "shares": total_shares,
             "cost_basis": cost_basis,
             "avg_buy_price": avg_buy_price,
@@ -315,16 +323,41 @@ async def journal_list(
 
     # 老的 portfolio 结构仍然要算（顶部 stat 卡片要用）
     all_active = [j for j in all_journals if j.status == "active"]
-    total_capital = user.total_capital or None
-    portfolio = _build_portfolio(all_active, price_map, quote_map, total_capital)
+    portfolio = _build_portfolio(all_active, price_map, quote_map, None)
     portfolio_by_ticker = {p["ticker"]: p for p in portfolio}
-    total_market_value = sum(p["market_value"] or 0 for p in portfolio)
-    total_pnl = sum(p["pnl"] or 0 for p in portfolio)
-    total_cost = sum((p["cost_basis"] * p["shares"]) for p in portfolio if p["cost_basis"])
-    total_pnl_pct = (total_pnl / total_cost * 100) if total_cost > 0 else None
-    display_capital = total_capital
-    if total_capital and total_pnl:
-        display_capital = total_capital + total_pnl / 10000
+
+    # === 按币种分两路统计 ===
+    # 资金（principal/dividend）从 user 字段拿；市值/浮盈从 portfolio 按币种聚合
+    accounts: dict[str, dict] = {
+        "CNY": {
+            "label": "A 股账户",
+            "symbol": "¥",
+            "principal": user.cny_principal or 0,
+            "dividend": user.cny_dividend or 0,
+            "market_value": 0.0,
+            "unrealized_pnl": 0.0,
+            "principal_field": "cny_principal",
+            "dividend_field": "cny_dividend",
+        },
+        "HKD": {
+            "label": "港股账户",
+            "symbol": "HK$",
+            "principal": user.hkd_principal or 0,
+            "dividend": user.hkd_dividend or 0,
+            "market_value": 0.0,
+            "unrealized_pnl": 0.0,
+            "principal_field": "hkd_principal",
+            "dividend_field": "hkd_dividend",
+        },
+    }
+    for p in portfolio:
+        cur = p.get("currency") or "CNY"
+        if cur in accounts:
+            accounts[cur]["market_value"] += p.get("market_value") or 0
+            accounts[cur]["unrealized_pnl"] += p.get("pnl") or 0
+    # 总资产 = 总市值 + 现金（本金）+ 分红
+    for acc in accounts.values():
+        acc["total_assets"] = acc["market_value"] + acc["principal"] + acc["dividend"]
 
     # 投资随笔（拉全部，模板按时间归档）
     notes_q = select(InvestmentNote).where(
@@ -384,9 +417,18 @@ async def journal_list(
         if realized_pnl:
             total_realized_pnl += realized_pnl
 
+        # 币种：active 票从 quote 拿；closed 票从 ticker code 推断
+        currency = (quote_map.get(ticker) or {}).get("currency")
+        if not currency:
+            from bigv_twins.stock_data import resolve_ticker
+            info = resolve_ticker(ticker)
+            currency = info.currency if info else "CNY"
+
         card = {
             "ticker": ticker,
             "ticker_name": latest.ticker_name,
+            "currency": currency,
+            "currency_symbol": "HK$" if currency == "HKD" else ("US$" if currency == "USD" else "¥"),
             "entries": entries,  # ascending order, oldest first
             "trade_count": len(entries),
             "any_active": any_active,
@@ -450,11 +492,7 @@ async def journal_list(
             "closed_count": closed_count,
             "all_count": all_count,
             "status_filter": status_filter,
-            "total_capital": display_capital,
-            "base_capital": total_capital,
-            "total_market_value": total_market_value,
-            "total_pnl": total_pnl,
-            "total_pnl_pct": total_pnl_pct,
+            "accounts": accounts,  # CNY / HKD 各自 principal/dividend/mv/pnl/total_assets
             "total_realized_pnl": total_realized_pnl,
             "current_notes": current_notes,
             "notes_month_sections": notes_month_sections,
@@ -468,22 +506,30 @@ async def set_capital(
     request: Request,
     user: Annotated[User, Depends(auth.require_user)],
     session: Annotated[AsyncSession, Depends(db.get_session)],
-    mode: str = Form("set"),
-    total_capital: float = Form(None),
-    amount: float = Form(None),
+    mode: str = Form("set"),                   # set / deposit / withdraw
+    field: str = Form("cny_principal"),        # cny_principal / cny_dividend / hkd_principal / hkd_dividend
+    amount: float = Form(None),                # 单位：元（包括港币元）
 ):
+    """修改某币种的本金 or 分红入账。amount 为 None 时仅记录日志返回。"""
+    if field not in ("cny_principal", "cny_dividend", "hkd_principal", "hkd_dividend"):
+        raise HTTPException(status_code=400, detail="invalid field")
+    if amount is None:
+        return RedirectResponse("/journal", status_code=303)
+
     user_obj = await session.get(User, user.id)
-    log.info("set_capital called: mode=%s total_capital=%s amount=%s user_id=%s current=%s",
-             mode, total_capital, amount, user.id, user_obj.total_capital)
-    if mode == "set" and total_capital is not None:
-        user_obj.total_capital = total_capital
-    elif mode == "deposit" and amount:
-        user_obj.total_capital = (user_obj.total_capital or 0) + amount
-    elif mode == "withdraw" and amount:
-        user_obj.total_capital = max(0, (user_obj.total_capital or 0) - amount)
-    log.info("set_capital after: total_capital=%s", user_obj.total_capital)
+    cur = getattr(user_obj, field) or 0
+    if mode == "set":
+        new = amount
+    elif mode == "deposit":
+        new = cur + amount
+    elif mode == "withdraw":
+        new = max(0, cur - amount)
+    else:
+        raise HTTPException(status_code=400, detail="invalid mode")
+    setattr(user_obj, field, new)
+    log.info("set_capital: user=%s field=%s mode=%s old=%s new=%s",
+             user.id, field, mode, cur, new)
     await session.commit()
-    log.info("set_capital committed")
     return RedirectResponse("/journal", status_code=303)
 
 

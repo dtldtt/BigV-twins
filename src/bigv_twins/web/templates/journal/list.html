@@ -7,51 +7,57 @@
   <a href="/journal/new" role="button">+ 新建记录</a>
 </div>
 
-<!-- Total Capital -->
-<div class="capital-bar">
-  {% if total_capital %}
-    <div class="capital-display">
-      <span>💰 账户总金额：<strong>{{ "%.2f"|format(total_capital) }}</strong> 万元</span>
-      {% if total_pnl %}
-        <span class="capital-pnl {% if total_pnl > 0 %}up{% elif total_pnl < 0 %}down{% endif %}">
-          (含浮盈 {{ "%+.2f"|format(total_pnl / 10000) }} 万)
-        </span>
+<!-- 双账户：A 股 + 港股 彻底隔离，单位都是 元（CNY/HKD 各自） -->
+<div class="account-grid">
+  {% for cur, acc in accounts.items() %}
+  {% set has = acc.principal or acc.dividend or acc.market_value %}
+  <div class="account-card {% if not has %}account-card-empty{% endif %}">
+    <div class="account-head">
+      <strong>{% if cur == 'CNY' %}🇨🇳{% else %}🇭🇰{% endif %} {{ acc.label }}</strong>
+      {% if has %}
+      <span class="account-total">
+        总资产 <strong>{{ acc.symbol }}{{ "{:,.0f}".format(acc.total_assets) }}</strong>
+      </span>
       {% endif %}
-      <span class="capital-actions">
-        <a href="#" onclick="document.getElementById('capital-edit').style.display='block'; this.parentElement.parentElement.style.display='none'; return false;" class="capital-link">修改</a>
-        <a href="#" onclick="document.getElementById('capital-transfer').style.display='block'; return false;" class="capital-link">转入/转出</a>
+    </div>
+    {% if has %}
+    <div class="account-breakdown">
+      <span class="abk-item">
+        总市值 <strong>{{ acc.symbol }}{{ "{:,.0f}".format(acc.market_value) }}</strong>
+        {% if acc.unrealized_pnl %}
+          <span class="{% if acc.unrealized_pnl > 0 %}up{% elif acc.unrealized_pnl < 0 %}down{% endif %}" style="font-size:0.78rem">
+            ({{ "%+.0f"|format(acc.unrealized_pnl) }})
+          </span>
+        {% endif %}
+      </span>
+      <span class="abk-sep">+</span>
+      <span class="abk-item">
+        现金 <strong>{{ acc.symbol }}{{ "{:,.0f}".format(acc.principal) }}</strong>
+        <a href="#" class="abk-link" onclick="document.getElementById('cap-{{cur}}').style.display=document.getElementById('cap-{{cur}}').style.display==='none'?'flex':'none'; return false">[修改]</a>
+      </span>
+      <span class="abk-sep">+</span>
+      <span class="abk-item">
+        分红 <strong>{{ acc.symbol }}{{ "{:,.0f}".format(acc.dividend) }}</strong>
+        <a href="#" class="abk-link" onclick="document.getElementById('div-{{cur}}').style.display=document.getElementById('div-{{cur}}').style.display==='none'?'flex':'none'; return false">[订正]</a>
       </span>
     </div>
-    <div id="capital-edit" style="display:none; margin-top:0.5rem">
-      <form method="post" action="/journal/capital" class="capital-form">
-        <input type="hidden" name="mode" value="set">
-        <input type="number" name="total_capital" value="{{ total_capital }}" step="0.01" min="0" class="capital-input">
-        <span class="capital-unit">万元</span>
-        <button type="submit" class="capital-btn">确定</button>
-        <a href="#" onclick="document.getElementById('capital-edit').style.display='none'; document.querySelector('.capital-display').style.display=''; return false;" class="capital-link">取消</a>
-      </form>
-    </div>
-    <div id="capital-transfer" style="display:none; margin-top:0.5rem">
-      <form method="post" action="/journal/capital" class="capital-form">
-        <select name="mode" class="capital-select">
-          <option value="deposit">转入</option>
-          <option value="withdraw">转出</option>
-        </select>
-        <input type="number" name="amount" step="0.01" min="0" placeholder="金额" class="capital-input">
-        <span class="capital-unit">万元</span>
-        <button type="submit" class="capital-btn">确定</button>
-        <a href="#" onclick="document.getElementById('capital-transfer').style.display='none'; return false;" class="capital-link">取消</a>
-      </form>
-    </div>
-  {% else %}
-    <form method="post" action="/journal/capital" class="capital-form">
-      <input type="hidden" name="mode" value="set">
-      <span class="capital-label">设置账户总金额：</span>
-      <input type="number" name="total_capital" step="0.01" min="0" placeholder="如 50" class="capital-input">
-      <span class="capital-unit">万元</span>
-      <button type="submit" class="capital-btn">确定</button>
+    {% endif %}
+    <!-- 现金修改表单（默认隐藏） -->
+    <form method="post" action="/journal/capital" id="cap-{{cur}}" class="account-form" style="display:none">
+      <input type="hidden" name="field" value="{{ acc.principal_field }}">
+      <select name="mode"><option value="set">设为</option><option value="deposit">转入</option><option value="withdraw">转出</option></select>
+      <input type="number" name="amount" step="0.01" min="0" placeholder="{{ acc.symbol }}金额（元）" required>
+      <button type="submit">确定</button>
     </form>
-  {% endif %}
+    <!-- 分红订正表单（默认隐藏） -->
+    <form method="post" action="/journal/capital" id="div-{{cur}}" class="account-form" style="display:none">
+      <input type="hidden" name="field" value="{{ acc.dividend_field }}">
+      <select name="mode"><option value="set">设为</option><option value="deposit">+</option><option value="withdraw">−</option></select>
+      <input type="number" name="amount" step="0.01" min="0" placeholder="{{ acc.symbol }}金额（元）" required>
+      <button type="submit">确定</button>
+    </form>
+  </div>
+  {% endfor %}
 </div>
 
 
@@ -59,20 +65,11 @@
 <section style="margin-top:1.5rem">
   <div style="display:flex; align-items:center; gap:1rem; margin-bottom:0.6rem">
     <h3 style="margin:0">📊 持仓情况</h3>
-    {% if total_pnl is not none %}
-      <span class="muted" style="font-size:0.85rem">
-        浮盈
-        <span class="{% if total_pnl > 0 %}up{% elif total_pnl < 0 %}down{% endif %}" style="font-weight:bold">
-          {{ "%+.0f"|format(total_pnl) }}元
-          {% if total_pnl_pct is not none %}({{ "%+.1f%%"|format(total_pnl_pct) }}){% endif %}
-        </span>
-      </span>
-    {% endif %}
     {% if total_realized_pnl %}
       <span class="muted" style="font-size:0.85rem">
-        已实现
+        累计已实现
         <span class="{% if total_realized_pnl > 0 %}up{% elif total_realized_pnl < 0 %}down{% endif %}" style="font-weight:bold">
-          {{ "%+.0f"|format(total_realized_pnl) }}元
+          ¥{{ "%+.0f"|format(total_realized_pnl) }}
         </span>
       </span>
     {% endif %}
@@ -102,18 +99,21 @@
             <strong class="tc-name">{{ c.ticker_name }}</strong>
             <code class="tc-code">{{ c.ticker }}</code>
           </a>
+          <span class="tc-currency tc-currency-{{ c.currency|lower }}">
+            {% if c.currency == 'HKD' %}港股{% elif c.currency == 'USD' %}美股{% else %}A股{% endif %}
+          </span>
           <a href="/stock/{{ c.ticker }}" class="tc-detail-btn" onclick="event.stopPropagation()">📊 详情</a>
         </div>
         <div class="tc-summary-row">
           {% if c.any_active %}
             <span class="tc-stat">持仓 <strong>{{ c.current_shares }}</strong> 股</span>
-            {% if c.cost_basis is not none %}<span class="tc-stat">成本 ¥{{ "%.2f"|format(c.cost_basis) }}</span>{% endif %}
-            {% if c.avg_buy_price is not none %}<span class="tc-stat">买入均价 ¥{{ "%.2f"|format(c.avg_buy_price) }}</span>{% endif %}
-            {% if c.current_price %}<span class="tc-stat">现价 ¥{{ "%.2f"|format(c.current_price) }}</span>{% endif %}
-            {% if c.market_value %}<span class="tc-stat">市值 ¥{{ "%.0f"|format(c.market_value) }}</span>{% endif %}
+            {% if c.cost_basis is not none %}<span class="tc-stat">成本 {{ c.currency_symbol }}{{ "%.2f"|format(c.cost_basis) }}</span>{% endif %}
+            {% if c.avg_buy_price is not none %}<span class="tc-stat">买入均价 {{ c.currency_symbol }}{{ "%.2f"|format(c.avg_buy_price) }}</span>{% endif %}
+            {% if c.current_price %}<span class="tc-stat">现价 {{ c.currency_symbol }}{{ "%.2f"|format(c.current_price) }}</span>{% endif %}
+            {% if c.market_value %}<span class="tc-stat">市值 {{ c.currency_symbol }}{{ "%.0f"|format(c.market_value) }}</span>{% endif %}
             {% if c.unrealized_pnl is not none %}
               <span class="tc-stat tc-pnl {% if c.unrealized_pnl > 0 %}up{% elif c.unrealized_pnl < 0 %}down{% endif %}">
-                总盈亏 {{ "%+.0f"|format(c.unrealized_pnl) }}元
+                总盈亏 {{ c.currency_symbol }}{{ "%+.0f"|format(c.unrealized_pnl) }}
                 {% if c.unrealized_pct is not none %}({{ "%+.1f%%"|format(c.unrealized_pct) }}){% endif %}
               </span>
             {% endif %}
@@ -122,7 +122,7 @@
             {% if c.hold_days is not none %}<span class="tc-stat">持有 {{ c.hold_days }} 天</span>{% endif %}
             {% if c.realized_pnl %}
               <span class="tc-stat tc-pnl {% if c.realized_pnl > 0 %}up{% elif c.realized_pnl < 0 %}down{% endif %}">
-                实现 {{ "%+.0f"|format(c.realized_pnl) }}元
+                实现 {{ c.currency_symbol }}{{ "%+.0f"|format(c.realized_pnl) }}
                 {% if c.realized_pct is not none %}({{ "%+.1f%%"|format(c.realized_pct) }}){% endif %}
               </span>
             {% endif %}
@@ -139,7 +139,7 @@
               <span class="journal-action journal-action-{{ j.action }}">
                 {% if j.action == 'open' %}建仓{% elif j.action == 'add' %}加仓{% elif j.action == 'reduce' %}减仓{% elif j.action == 'close' %}清仓{% elif j.action == 'retroactive' %}补录{% else %}{{ j.action }}{% endif %}
               </span>
-              <span class="trade-price">¥{{ "%.2f"|format(j.price_at_decision) if j.price_at_decision else "—" }}{% if j.shares %} × {{ j.shares }}股{% endif %}</span>
+              <span class="trade-price">{{ c.currency_symbol }}{{ "%.2f"|format(j.price_at_decision) if j.price_at_decision else "—" }}{% if j.shares %} × {{ j.shares }}股{% endif %}</span>
             </a>
             {% if j.reasoning %}<div class="trade-extra">💡 {{ j.reasoning }}</div>{% endif %}
             {% if j.action_detail %}<div class="trade-extra">📋 {{ j.action_detail }}</div>{% endif %}
@@ -300,6 +300,29 @@ document.querySelectorAll('.note-item .md-rendered').forEach(el => {
 .capital-label { font-size:0.85rem; white-space:nowrap; }
 .up { color:#e53935; }
 .down { color:#43a047; }
+
+/* === 双账户卡片（A 股 + 港股 隔离） === */
+.account-grid { display:grid; grid-template-columns:1fr 1fr; gap:0.8rem; margin-bottom:1.2rem; }
+.account-card { background:#f0f7ff; border:1px solid #cce5ff; border-radius:8px; padding:0.7rem 1rem; }
+.account-card-empty { opacity:0.55; background:#fafafa; border-color:#e0e0e0; }
+.account-head { display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.4rem; font-size:0.92rem; }
+.account-total { font-size:0.85rem; }
+.account-total strong { font-size:1rem; color:#0d47a1; }
+.account-breakdown { font-size:0.82rem; display:flex; flex-wrap:wrap; gap:0.5rem; align-items:baseline; color:#444; }
+.abk-item strong { color:#222; }
+.abk-sep { color:#888; }
+.abk-link { font-size:0.72rem; color:#1565c0; text-decoration:none; margin-left:0.2rem; }
+.abk-link:hover { text-decoration:underline; }
+.account-form { display:flex; gap:0.4rem; margin-top:0.5rem; align-items:center; }
+.account-form select, .account-form input, .account-form button { padding:0.25rem 0.5rem !important; font-size:0.82rem !important; margin:0 !important; width:auto !important; }
+.account-form input[type=number] { flex:1; }
+@media (max-width: 700px) { .account-grid { grid-template-columns:1fr; } }
+
+/* 币种标签 */
+.tc-currency { font-size:0.7rem; padding:0.05rem 0.4rem; border-radius:3px; line-height:1.5; }
+.tc-currency-cny { background:#fff5f5; color:#c62828; }
+.tc-currency-hkd { background:#fff8e1; color:#7a5c00; }
+.tc-currency-usd { background:#e8f5e9; color:#2e7d32; }
 .notes-current { display:flex; flex-direction:column; gap:0.4rem; margin-bottom:0.6rem; }
 .note-item { display:flex; gap:0.7rem; align-items:flex-start; padding:0.6rem 0.8rem; background:#fffbe8; border:1px solid #f5e6a3; border-radius:6px; }
 .note-date { color:#7a5c00; font-family:'SF Mono','Consolas',monospace; font-size:0.78rem; flex-shrink:0; min-width:5.5rem; padding-top:0.15rem; }

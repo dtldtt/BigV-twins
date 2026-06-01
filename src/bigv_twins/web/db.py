@@ -38,7 +38,12 @@ class User(Base):
     invite_id: Mapped[int | None] = mapped_column(ForeignKey("invites.id"), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
-    total_capital: Mapped[float | None] = mapped_column(Float, nullable=True)
+    total_capital: Mapped[float | None] = mapped_column(Float, nullable=True)  # legacy 万元，迁移后由 cny_principal 替代（保留 backward compat）
+    # v0.7: 按币种隔离的资金 — 单位都是 元（人民币：CNY，港币：HKD）
+    cny_principal: Mapped[float] = mapped_column(Float, default=0, nullable=False)  # A 股账户本金 (转入-转出净额)
+    cny_dividend: Mapped[float] = mapped_column(Float, default=0, nullable=False)   # A 股累计分红入账
+    hkd_principal: Mapped[float] = mapped_column(Float, default=0, nullable=False)  # 港股账户本金
+    hkd_dividend: Mapped[float] = mapped_column(Float, default=0, nullable=False)   # 港股累计分红入账
 
     conversations: Mapped[list["Conversation"]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
@@ -514,6 +519,22 @@ async def init_db() -> None:
             await conn.exec_driver_sql(
                 "ALTER TABLE backtest_entries ADD COLUMN sentiment VARCHAR(16) "
                 "NOT NULL DEFAULT 'unknown'"
+            )
+        except Exception:
+            pass
+        # v0.7: 按币种隔离的资金 — A 股/港股账户彻底分开
+        for col in ("cny_principal", "cny_dividend", "hkd_principal", "hkd_dividend"):
+            try:
+                await conn.exec_driver_sql(
+                    f"ALTER TABLE users ADD COLUMN {col} FLOAT NOT NULL DEFAULT 0"
+                )
+            except Exception:
+                pass
+        # 一次性把老 total_capital (万元) 迁到 cny_principal (元) — 仅当 cny_principal 还是 0 时
+        try:
+            await conn.exec_driver_sql(
+                "UPDATE users SET cny_principal = COALESCE(total_capital, 0) * 10000 "
+                "WHERE cny_principal = 0 AND total_capital IS NOT NULL"
             )
         except Exception:
             pass
