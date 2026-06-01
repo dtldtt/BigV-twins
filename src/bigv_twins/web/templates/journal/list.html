@@ -55,117 +55,103 @@
 </div>
 
 
-<!-- Portfolio Overview -->
-{% if portfolio %}
-<section class="portfolio-section">
-  <h3>
-    💼 实时持仓
+<!-- 持仓情况 — 一个 section 包含所有 ticker 卡片 -->
+<section style="margin-top:1.5rem">
+  <div style="display:flex; align-items:center; gap:1rem; margin-bottom:0.6rem">
+    <h3 style="margin:0">📊 持仓情况</h3>
     {% if total_pnl is not none %}
-      <span class="portfolio-total {% if total_pnl > 0 %}up{% elif total_pnl < 0 %}down{% endif %}">
-        总收益 {{ "%+.0f"|format(total_pnl) }}元
-        {% if total_pnl_pct is not none %}({{ "%+.1f%%"|format(total_pnl_pct) }}){% endif %}
+      <span class="muted" style="font-size:0.85rem">
+        浮盈
+        <span class="{% if total_pnl > 0 %}up{% elif total_pnl < 0 %}down{% endif %}" style="font-weight:bold">
+          {{ "%+.0f"|format(total_pnl) }}元
+          {% if total_pnl_pct is not none %}({{ "%+.1f%%"|format(total_pnl_pct) }}){% endif %}
+        </span>
       </span>
     {% endif %}
-  </h3>
-  <div class="portfolio-cards">
-    {% for p in portfolio %}
-    <div class="pf-card">
-      <div class="pf-head">
-        <a href="/stock/{{ p.ticker }}"><strong>{{ p.name }}</strong></a>
-        <code>{{ p.ticker }}</code>
-        {% if p.pct_of_total %}<span class="pf-pct">{{ "%.1f%%"|format(p.pct_of_total) }}</span>{% endif %}
-      </div>
-      <div class="pf-body">
-        <div class="pf-row">
-          <span class="pf-label">现价</span>
-          <span>{% if p.current_price %}¥{{ "%.3f"|format(p.current_price) }}{% else %}—{% endif %}</span>
-          {% if p.daily_chg is not none %}
-            <span class="pf-chg {% if p.daily_chg > 0 %}up{% elif p.daily_chg < 0 %}down{% endif %}">
-              今日 {{ "%+.2f%%"|format(p.daily_chg) }}
-            </span>
-          {% endif %}
-        </div>
-        <div class="pf-row">
-          <span class="pf-label">持仓</span>
-          <span>{{ p.shares }}股{% if p.market_value %} · ¥{{ "%.0f"|format(p.market_value) }}{% endif %}</span>
-        </div>
-        <div class="pf-row">
-          <span class="pf-label">成本价</span>
-          <span>¥{{ "%.3f"|format(p.cost_basis) }}</span>
-          <span class="pf-label" style="margin-left:1rem">买入均价</span>
-          <span>¥{{ "%.3f"|format(p.avg_buy_price) }}</span>
-        </div>
-        <div class="pf-row pf-pnl">
-          <span class="pf-label">盈亏</span>
-          {% if p.pnl is not none %}
-            <span class="{% if p.pnl > 0 %}up{% elif p.pnl < 0 %}down{% endif %}">
-              {{ "%+.0f"|format(p.pnl) }}元 ({{ "%+.1f%%"|format(p.pnl_pct) }})
-            </span>
+    {% if total_realized_pnl %}
+      <span class="muted" style="font-size:0.85rem">
+        已实现
+        <span class="{% if total_realized_pnl > 0 %}up{% elif total_realized_pnl < 0 %}down{% endif %}" style="font-weight:bold">
+          {{ "%+.0f"|format(total_realized_pnl) }}元
+        </span>
+      </span>
+    {% endif %}
+  </div>
+
+  <!-- Filter tabs -->
+  <div class="filter-tabs">
+    <a href="/journal?status=active" class="filter-tab {% if status_filter == 'active' %}active{% endif %}">
+      持仓中 <span class="tab-count">{{ active_count }}</span>
+    </a>
+    <a href="/journal?status=closed" class="filter-tab {% if status_filter == 'closed' %}active{% endif %}">
+      已清仓 <span class="tab-count">{{ closed_count }}</span>
+    </a>
+    <a href="/journal?status=all" class="filter-tab {% if status_filter == 'all' %}active{% endif %}">
+      全部 <span class="tab-count">{{ all_count }}</span>
+    </a>
+  </div>
+
+  {% if ticker_cards %}
+  <div class="ticker-card-list">
+    {% for c in ticker_cards %}
+    <details class="ticker-card {% if not c.any_active %}ticker-card-closed{% endif %}">
+      <summary class="ticker-card-head">
+        <span class="tc-arrow">▶</span>
+        <strong class="tc-name">{{ c.ticker_name }}</strong>
+        <code class="tc-code">{{ c.ticker }}</code>
+        <a href="/stock/{{ c.ticker }}" class="tc-detail">详情 →</a>
+      </summary>
+      <div class="tc-body">
+        <div class="tc-summary-row">
+          {% if c.any_active %}
+            <span class="tc-stat">持仓 <strong>{{ c.current_shares }}</strong> 股</span>
+            {% if c.cost_basis %}<span class="tc-stat">成本 ¥{{ "%.2f"|format(c.cost_basis) }}</span>{% endif %}
+            {% if c.current_price %}<span class="tc-stat">现价 ¥{{ "%.2f"|format(c.current_price) }}</span>{% endif %}
+            {% if c.market_value %}<span class="tc-stat">市值 ¥{{ "%.0f"|format(c.market_value) }}</span>{% endif %}
+            {% if c.unrealized_pnl is not none %}
+              <span class="tc-stat tc-pnl {% if c.unrealized_pnl > 0 %}up{% elif c.unrealized_pnl < 0 %}down{% endif %}">
+                浮盈 {{ "%+.0f"|format(c.unrealized_pnl) }}元
+                {% if c.unrealized_pct is not none %}({{ "%+.1f%%"|format(c.unrealized_pct) }}){% endif %}
+              </span>
+            {% endif %}
           {% else %}
-            <span>—</span>
+            <span class="tc-stat muted">已清仓 {{ c.close_date.strftime("%Y-%m-%d") if c.close_date else "" }}</span>
+            {% if c.hold_days is not none %}<span class="tc-stat">持有 {{ c.hold_days }} 天</span>{% endif %}
+            {% if c.realized_pnl %}
+              <span class="tc-stat tc-pnl {% if c.realized_pnl > 0 %}up{% elif c.realized_pnl < 0 %}down{% endif %}">
+                实现 {{ "%+.0f"|format(c.realized_pnl) }}元
+                {% if c.realized_pct is not none %}({{ "%+.1f%%"|format(c.realized_pct) }}){% endif %}
+              </span>
+            {% endif %}
           {% endif %}
         </div>
+
+        <div class="tc-trades">
+          {% for j in c.entries %}
+          <div class="tc-trade">
+            <a href="/journal/{{ j.id }}" class="tc-trade-line">
+              <span class="trade-date">{{ j.created_at.strftime("%Y-%m-%d") if j.created_at else "" }}</span>
+              <span class="journal-action journal-action-{{ j.action }}">
+                {% if j.action == 'open' %}建仓{% elif j.action == 'add' %}加仓{% elif j.action == 'reduce' %}减仓{% elif j.action == 'close' %}清仓{% elif j.action == 'retroactive' %}补录{% else %}{{ j.action }}{% endif %}
+              </span>
+              <span class="trade-price">¥{{ "%.2f"|format(j.price_at_decision) if j.price_at_decision else "—" }}{% if j.shares %} × {{ j.shares }}股{% endif %}</span>
+            </a>
+            {% if j.reasoning %}<div class="trade-extra">💡 {{ j.reasoning }}</div>{% endif %}
+            {% if j.action_detail %}<div class="trade-extra">📋 {{ j.action_detail }}</div>{% endif %}
+          </div>
+          {% endfor %}
+        </div>
       </div>
-    </div>
+    </details>
     {% endfor %}
   </div>
+  {% else %}
+  <div style="text-align:center; padding:3rem; color:#888">
+    <p>{% if status_filter == 'active' %}当前没有在手持仓。{% elif status_filter == 'closed' %}还没有已清仓的标的。{% else %}还没有决策记录。{% endif %}</p>
+    <a href="/journal/new" role="button">+ 新建记录</a>
+  </div>
+  {% endif %}
 </section>
-{% endif %}
-
-<!-- Transactions section -->
-<h3 style="margin:1.5rem 0 0.5rem">📈 交易操作与思路记录</h3>
-<div style="margin:0 0 0.8rem; display:flex; gap:1rem; font-size:0.85rem; border-bottom:1px solid #eee; padding-bottom:0.5rem">
-  <a href="/journal?status=all" {% if status_filter == 'all' %}style="font-weight:bold; color:#333"{% endif %}>全部</a>
-  <a href="/journal?status=active" {% if status_filter == 'active' %}style="font-weight:bold; color:#333"{% endif %}>持仓中</a>
-  <a href="/journal?status=closed" {% if status_filter == 'closed' %}style="font-weight:bold; color:#333"{% endif %}>已清仓</a>
-</div>
-
-<!-- Journal Entries: grouped by ticker -->
-{% if ticker_groups %}
-<div class="ticker-group-grid">
-  {% for g in ticker_groups %}
-  <details class="ticker-group {{ 'ticker-group-closed' if not g.any_active else '' }}">
-    <summary class="ticker-group-summary">
-      <div class="ticker-summary-main">
-        <strong>{{ g.ticker_name }}</strong>
-        <code>{{ g.ticker }}</code>
-        {% if g.any_active %}
-          <span class="ticker-shares">持仓 {{ g.current_shares }} 股</span>
-          {% if g.pnl_pct is not none %}
-            <span class="journal-pnl {% if g.pnl_pct > 0 %}up{% elif g.pnl_pct < 0 %}down{% endif %}">
-              {{ "%+.1f%%"|format(g.pnl_pct) }}
-            </span>
-          {% endif %}
-        {% else %}
-          <span class="ticker-shares muted">已清仓</span>
-        {% endif %}
-      </div>
-      <div class="ticker-summary-meta muted">
-        {{ g.trade_count }} 笔 · 最近 {{ g.latest_date.strftime("%Y-%m-%d") if g.latest_date else "" }}
-        <a href="/stock/{{ g.ticker }}" style="margin-left:0.5rem">详情</a>
-      </div>
-    </summary>
-    <div class="ticker-trades">
-      {% for j in g.entries %}
-      <a href="/journal/{{ j.id }}" class="ticker-trade-row">
-        <span class="trade-date">{{ j.created_at.strftime("%Y-%m-%d") if j.created_at else "" }}</span>
-        <span class="journal-action journal-action-{{ j.action }}">
-          {% if j.action == 'open' %}建仓{% elif j.action == 'add' %}加仓{% elif j.action == 'reduce' %}减仓{% elif j.action == 'close' %}清仓{% elif j.action == 'retroactive' %}补录{% else %}{{ j.action }}{% endif %}
-        </span>
-        <span class="trade-price">¥{{ "%.2f"|format(j.price_at_decision) if j.price_at_decision else "—" }}{% if j.shares %} × {{ j.shares }}{% endif %}</span>
-        {% if j.reasoning %}<span class="trade-reasoning muted">{{ j.reasoning[:40] }}{% if j.reasoning|length > 40 %}…{% endif %}</span>{% endif %}
-      </a>
-      {% endfor %}
-    </div>
-  </details>
-  {% endfor %}
-</div>
-{% else %}
-<div style="text-align:center; padding:3rem; color:#888">
-  <p>还没有决策记录。</p>
-  <a href="/journal/new" role="button">创建第一条记录</a>
-</div>
-{% endif %}
 
 
 <!-- 投资随笔 -->
@@ -215,49 +201,50 @@
 .capital-btn { padding:0.25rem 0.6rem !important; font-size:0.8rem !important; margin:0 !important; width:auto !important; }
 .capital-unit { font-size:0.8rem; color:#666; }
 .capital-label { font-size:0.85rem; white-space:nowrap; }
-.portfolio-section { margin-bottom:1.5rem; }
-.portfolio-section h3 { display:flex; align-items:center; gap:1rem; }
-.portfolio-total { font-size:0.85rem; font-weight:normal; }
-.portfolio-cards { display:flex; flex-direction:column; gap:0.6rem; }
-.pf-card { border:1px solid #e8e8e8; border-radius:8px; padding:0.8rem 1rem; }
-.pf-head { display:flex; align-items:center; gap:0.5rem; margin-bottom:0.4rem; }
-.pf-pct { font-size:0.75rem; background:#e3f2fd; color:#1565c0; padding:0.1rem 0.4rem; border-radius:3px; margin-left:auto; }
-.pf-row { display:flex; align-items:center; gap:0.5rem; font-size:0.83rem; margin-bottom:0.2rem; }
-.pf-label { color:#888; min-width:3.5rem; }
-.pf-chg { margin-left:auto; }
-.pf-pnl { font-weight:bold; margin-top:0.2rem; }
 .up { color:#e53935; }
 .down { color:#43a047; }
-.journal-grid { display:flex; flex-direction:column; gap:0.6rem; }
-.journal-card { display:block; padding:0.8rem 1rem; border:1px solid #e0e0e0; border-radius:8px; text-decoration:none; color:inherit; }
-.journal-card:hover { box-shadow:0 2px 6px rgba(0,0,0,0.06); }
-.journal-closed { opacity:0.6; border-style:dashed; }
-.journal-card-head { display:flex; align-items:center; gap:0.5rem; margin-bottom:0.3rem; }
-.journal-action { font-size:0.7rem; padding:0.1rem 0.4rem; border-radius:3px; }
-.journal-action-open, .journal-action-add, .journal-action-retroactive { background:#e8f5e9; color:#2e7d32; }
-.journal-action-reduce, .journal-action-close { background:#ffebee; color:#c62828; }
-.journal-price-row { display:flex; justify-content:space-between; font-size:0.83rem; }
-.journal-pnl { font-weight:bold; }
-.journal-reasoning { font-size:0.82rem; color:#555; margin:0.2rem 0; }
 .notes-list { display:flex; flex-direction:column; gap:0.5rem; }
 .note-item { padding:0.7rem 1rem; background:#fafafa; border-radius:6px; border-left:3px solid #e0e0e0; }
 .note-content { font-size:0.9rem; white-space:pre-wrap; line-height:1.6; }
 .note-meta { display:flex; justify-content:space-between; align-items:center; margin-top:0.4rem; }
-.ticker-group-grid { display:flex; flex-direction:column; gap:0.5rem; }
-.ticker-group { border:1px solid #e0e0e0; border-radius:8px; overflow:hidden; }
-.ticker-group-closed { opacity:0.6; border-style:dashed; }
-.ticker-group-summary { padding:0.7rem 1rem; cursor:pointer; list-style:none; display:flex; justify-content:space-between; align-items:center; gap:1rem; }
-.ticker-group-summary::-webkit-details-marker { display:none; }
-.ticker-group[open] .ticker-group-summary { background:#fafafa; border-bottom:1px solid #eee; }
-.ticker-summary-main { display:flex; align-items:center; gap:0.5rem; flex-wrap:wrap; }
-.ticker-summary-meta { font-size:0.75rem; }
-.ticker-shares { font-size:0.8rem; padding:0.15rem 0.5rem; background:#e3f2fd; color:#1565c0; border-radius:3px; }
-.ticker-shares.muted { background:#f5f5f5; color:#888; }
-.ticker-trades { display:flex; flex-direction:column; }
-.ticker-trade-row { display:grid; grid-template-columns:5.5rem 3.5rem 1fr 2fr; gap:0.8rem; padding:0.5rem 1rem; font-size:0.82rem; color:inherit; text-decoration:none; border-top:1px solid #f0f0f0; align-items:center; }
-.ticker-trade-row:hover { background:#fafafa; }
-.trade-date { color:#888; }
-.trade-price { font-family:monospace; }
-.trade-reasoning { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+/* === Filter tabs (持仓中 / 已清仓 / 全部) === */
+.filter-tabs { display:flex; gap:0; margin-bottom:0.8rem; border-bottom:2px solid #eee; }
+.filter-tab { padding:0.4rem 1rem; font-size:0.88rem; color:#888; text-decoration:none; border-bottom:2px solid transparent; margin-bottom:-2px; }
+.filter-tab:hover { color:#333; }
+.filter-tab.active { color:#1565c0; border-bottom-color:#1565c0; font-weight:600; }
+.tab-count { font-size:0.75rem; color:#aaa; margin-left:0.2rem; }
+.filter-tab.active .tab-count { color:#1565c0; }
+
+/* === Ticker card (持仓情况单元) === */
+.ticker-card-list { display:flex; flex-direction:column; gap:0.5rem; }
+.ticker-card { border:1px solid #e0e0e0; border-radius:8px; overflow:hidden; }
+.ticker-card-closed { opacity:0.7; border-style:dashed; }
+.ticker-card-head { padding:0.7rem 1rem; cursor:pointer; list-style:none; display:flex; align-items:center; gap:0.6rem; }
+.ticker-card-head::-webkit-details-marker { display:none; }
+.ticker-card[open] .ticker-card-head { background:#fafafa; border-bottom:1px solid #f0f0f0; }
+.ticker-card[open] .tc-arrow { transform:rotate(90deg); }
+.tc-arrow { font-size:0.7rem; color:#888; transition:transform 0.15s; display:inline-block; }
+.tc-name { font-size:0.95rem; }
+.tc-code { font-size:0.78rem; color:#666; }
+.tc-detail { margin-left:auto; font-size:0.8rem; color:#1565c0; text-decoration:none; }
+.tc-detail:hover { text-decoration:underline; }
+.tc-body { padding:0.5rem 1rem 0.7rem; }
+.tc-summary-row { display:flex; flex-wrap:wrap; gap:0.7rem 1rem; padding:0.3rem 0 0.6rem; font-size:0.85rem; border-bottom:1px solid #f5f5f5; margin-bottom:0.5rem; }
+.tc-stat { color:#444; }
+.tc-stat strong { font-weight:600; }
+.tc-stat.muted { color:#888; }
+.tc-pnl { font-weight:600; }
+
+.tc-trades { display:flex; flex-direction:column; gap:0.4rem; }
+.tc-trade { font-size:0.83rem; }
+.tc-trade-line { display:grid; grid-template-columns:5.5rem 3.5rem auto 1fr; gap:0.7rem; align-items:center; padding:0.25rem 0; color:inherit; text-decoration:none; }
+.tc-trade-line:hover .trade-date { text-decoration:underline; }
+.trade-date { color:#888; font-family:'SF Mono','Consolas',monospace; font-size:0.78rem; }
+.trade-price { font-family:'SF Mono','Consolas',monospace; }
+.trade-extra { font-size:0.8rem; color:#555; padding:0.15rem 0 0.15rem 6.2rem; line-height:1.55; }
+.journal-action { font-size:0.7rem; padding:0.1rem 0.4rem; border-radius:3px; text-align:center; }
+.journal-action-open, .journal-action-add, .journal-action-retroactive { background:#e8f5e9; color:#2e7d32; }
+.journal-action-reduce, .journal-action-close { background:#ffebee; color:#c62828; }
 </style>
 {% endblock %}

@@ -278,27 +278,27 @@ async def journal_list(
     user: Annotated[User, Depends(auth.require_user)],
     session: Annotated[AsyncSession, Depends(db.get_session)],
 ):
-    status_filter = request.query_params.get("status", "active")
-    q = select(DecisionJournal).where(DecisionJournal.user_id == user.id)
-    if status_filter == "active":
-        q = q.where(DecisionJournal.status == "active")
-    elif status_filter == "closed":
-        q = q.where(DecisionJournal.status == "closed")
-    q = q.order_by(DecisionJournal.created_at.desc())
-    rows = await session.execute(q)
-    journals = list(rows.scalars())
+    status_filter = request.query_params.get("status", "active")  # active / closed / all
 
-    # Also get ALL active journals for portfolio (even if filter is 'closed')
-    all_q = select(DecisionJournal).where(
-        DecisionJournal.user_id == user.id, DecisionJournal.status == "active"
+    # 总是拉所有 journals（无视 filter）— 我们要算每个 tab 的 count，
+    # 并在 closed 卡片上做完整 pnl 计算（buys + sells）
+    rows = await session.execute(
+        select(DecisionJournal)
+        .where(DecisionJournal.user_id == user.id)
+        .order_by(DecisionJournal.created_at)  # 升序：每个 ticker 内交易按时间往后铺
     )
-    all_rows = await session.execute(all_q)
-    all_active = list(all_rows.scalars())
+    all_journals = list(rows.scalars())
 
-    # Fetch prices for all tickers
-    all_tickers = list({j.ticker for j in journals} | {j.ticker for j in all_active})
-    price_map = {}
-    quote_map = {}
+    # 按 ticker 分组
+    from collections import defaultdict
+    grouped: dict[str, list] = defaultdict(list)
+    for j in all_journals:
+        grouped[j.ticker].append(j)
+
+    # 拉所有 ticker 的实时报价（active 计浮盈用）
+    all_tickers = list(grouped.keys())
+    price_map: dict[str, float] = {}
+    quote_map: dict[str, dict] = {}
     if all_tickers:
         quotes = await asyncio.to_thread(
             get_watchlist_quotes, [_FakeW(t) for t in all_tickers]
@@ -308,71 +308,118 @@ async def journal_list(
                 price_map[qq["ticker"]] = qq["current"]
                 quote_map[qq["ticker"]] = qq
 
+    # 老的 portfolio 结构仍然要算（顶部 stat 卡片要用）
+    all_active = [j for j in all_journals if j.status == "active"]
     total_capital = user.total_capital or None
     portfolio = _build_portfolio(all_active, price_map, quote_map, total_capital)
-
-    # Total portfolio stats
+    portfolio_by_ticker = {p["ticker"]: p for p in portfolio}
     total_market_value = sum(p["market_value"] or 0 for p in portfolio)
     total_pnl = sum(p["pnl"] or 0 for p in portfolio)
     total_cost = sum((p["cost_basis"] * p["shares"]) for p in portfolio if p["cost_basis"])
     total_pnl_pct = (total_pnl / total_cost * 100) if total_cost > 0 else None
-
-    # Adjust displayed capital to include unrealized PnL
     display_capital = total_capital
     if total_capital and total_pnl:
-        display_capital = total_capital + total_pnl / 10000  # pnl is in yuan, capital in 万
+        display_capital = total_capital + total_pnl / 10000
 
-    # Fetch investment notes
+    # 投资随笔
     notes_q = select(InvestmentNote).where(
         InvestmentNote.user_id == user.id
     ).order_by(InvestmentNote.created_at.desc()).limit(20)
     notes_rows = await session.execute(notes_q)
     notes = list(notes_rows.scalars())
 
-    # Group journals by ticker for collapsible display
-    from collections import defaultdict
-    grouped: dict[str, list] = defaultdict(list)
-    for j in journals:
-        grouped[j.ticker].append(j)
-    portfolio_by_ticker = {p["ticker"]: p for p in portfolio}
-    ticker_groups = []
+    # === 给每只 ticker 算卡片显示需要的所有字段 ===
+    ticker_cards = []
+    total_realized_pnl = 0.0
     for ticker, entries in grouped.items():
-        entries_sorted = sorted(entries, key=lambda x: x.created_at, reverse=True)
-        latest = entries_sorted[0]
+        # entries 已经按 created_at 升序（DB 查询时排过）
         any_active = any(e.status == "active" for e in entries)
-        p = portfolio_by_ticker.get(ticker)
-        ticker_groups.append({
+        latest = entries[-1]
+
+        # 已实现盈亏（不管 active 还是 closed 都算，因为 closed 周期内可能有 reduce）
+        # 简化口径：sells (reduce + close) 总收入 − 已对应的 buys 成本（按 buy 比例分摊）
+        buys = [e for e in entries if e.action in ("open", "add", "retroactive")]
+        sells = [e for e in entries if e.action in ("reduce", "close")]
+        total_buy_cost = sum((b.price_at_decision or 0) * (b.shares or 0) for b in buys)
+        total_buy_shares = sum(b.shares or 0 for b in buys)
+        avg_cost = (total_buy_cost / total_buy_shares) if total_buy_shares else 0
+        realized_sold_shares = sum(s.shares or 0 for s in sells)
+        realized_proceeds = sum((s.price_at_decision or 0) * (s.shares or 0) for s in sells)
+        realized_pnl = realized_proceeds - avg_cost * realized_sold_shares if avg_cost else 0
+        if realized_pnl:
+            total_realized_pnl += realized_pnl
+
+        card = {
             "ticker": ticker,
             "ticker_name": latest.ticker_name,
-            "entries": entries_sorted,
+            "entries": entries,  # ascending order, oldest first
             "trade_count": len(entries),
-            "latest_action": latest.action,
-            "latest_date": latest.created_at,
             "any_active": any_active,
-            "current_shares": p["shares"] if p else 0,
-            "cost_basis": p["cost_basis"] if p else None,
-            "pnl": p["pnl"] if p else None,
-            "pnl_pct": p["pnl_pct"] if p else None,
-            "current_price": price_map.get(ticker),
-        })
-    # Sort: active first (by latest date desc), then closed (by latest date desc)
-    ticker_groups.sort(key=lambda g: (not g["any_active"], -(g["latest_date"].timestamp() if g["latest_date"] else 0)))
+            "earliest_date": entries[0].created_at,
+            "latest_date": latest.created_at,
+            "realized_pnl": realized_pnl if sells else 0,
+            "realized_pct": (realized_pnl / (avg_cost * realized_sold_shares) * 100) if avg_cost and realized_sold_shares else None,
+        }
+
+        if any_active:
+            # 当前持仓信息（complex with reduces — reuse portfolio_by_ticker）
+            p = portfolio_by_ticker.get(ticker)
+            card.update({
+                "current_shares": p["shares"] if p else 0,
+                "cost_basis": p["cost_basis"] if p else None,
+                "current_price": price_map.get(ticker),
+                "market_value": p["market_value"] if p else 0,
+                "unrealized_pnl": p["pnl"] if p else None,
+                "unrealized_pct": p["pnl_pct"] if p else None,
+            })
+        else:
+            # 已清仓
+            close_action = next((e for e in reversed(entries) if e.action == "close"), None)
+            close_date = close_action.created_at if close_action else (latest.created_at if latest else None)
+            hold_days = (close_date - entries[0].created_at).days if (close_date and entries[0].created_at) else None
+            card.update({
+                "close_date": close_date,
+                "hold_days": hold_days,
+            })
+        ticker_cards.append(card)
+
+    # 各 tab count
+    active_count = sum(1 for c in ticker_cards if c["any_active"])
+    closed_count = sum(1 for c in ticker_cards if not c["any_active"])
+    all_count = len(ticker_cards)
+
+    # 按 status_filter 过滤
+    if status_filter == "active":
+        cards_view = [c for c in ticker_cards if c["any_active"]]
+    elif status_filter == "closed":
+        cards_view = [c for c in ticker_cards if not c["any_active"]]
+    else:
+        cards_view = ticker_cards[:]
+
+    # 排序
+    def _sort_key(c):
+        if c["any_active"]:
+            return (0, -(c.get("market_value") or 0))
+        else:
+            return (1, -(c["close_date"].timestamp() if c.get("close_date") else 0))
+    cards_view.sort(key=_sort_key)
 
     return templates.TemplateResponse(
         request=request,
         name="journal/list.html",
         context={
             "user": user,
-            "journals": journals,
-            "ticker_groups": ticker_groups,
-            "price_map": price_map,
+            "ticker_cards": cards_view,
+            "active_count": active_count,
+            "closed_count": closed_count,
+            "all_count": all_count,
             "status_filter": status_filter,
-            "portfolio": portfolio,
             "total_capital": display_capital,
             "base_capital": total_capital,
             "total_market_value": total_market_value,
             "total_pnl": total_pnl,
             "total_pnl_pct": total_pnl_pct,
+            "total_realized_pnl": total_realized_pnl,
             "notes": notes,
         },
     )
