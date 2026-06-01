@@ -123,12 +123,21 @@
     <div class="op-field op-critique">
       <span class="op-field-label">💬 评价</span>
       <div class="op-field-value">
-        {% if j.self_critique %}<pre class="critique-text">{{ j.self_critique }}</pre>{% else %}（空）{% endif %}
+        {% if j.critique_entries %}
+          <div class="critique-list">
+            {% for d, content in j.critique_entries %}
+            <div class="critique-entry">
+              <span class="critique-date">{% if d == "legacy" %}（早期记录）{% else %}{{ d }}{% endif %}</span>
+              <div class="critique-content">{{ content }}</div>
+            </div>
+            {% endfor %}
+          </div>
+        {% else %}（空）{% endif %}
       </div>
       <form method="post" action="/journal/{{ j.id }}/critique" class="op-critique-form">
         <input type="hidden" name="redirect_to" value="{{ redirect_url }}">
         <input type="text" name="critique" placeholder="以现在的视角，自评一下当时的操作">
-        <button type="submit">{% if j.self_critique %}追加{% else %}保存{% endif %}</button>
+        <button type="submit">{% if j.critique_entries %}追加{% else %}保存{% endif %}</button>
       </form>
     </div>
   </div>
@@ -247,6 +256,9 @@ td.down { color:#43a047; }
 .op-critique-form { grid-column:1 / -1; display:flex; gap:0.4rem; margin-top:0.3rem; }
 .op-critique-form input[type=text] { flex:1; font-size:0.83rem; padding:0.3rem; margin:0; }
 .op-critique-form button { padding:0.3rem 0.8rem; font-size:0.82rem; margin:0; width:auto; }
-.critique-text { font-family:inherit; font-size:0.83rem; white-space:pre-wrap; margin:0; padding:0.4rem 0.6rem; background:#fffdf6; border-left:3px solid #ffd54f; border-radius:0 3px 3px 0; }
+.critique-list { display:flex; flex-direction:column; gap:0.5rem; }
+.critique-entry { background:#fffdf6; border-left:3px solid #ffd54f; border-radius:0 3px 3px 0; padding:0.5rem 0.7rem; }
+.critique-date { display:inline-block; font-size:0.72rem; font-weight:600; color:#8c6d00; background:#fff3cd; padding:0.15rem 0.5rem; border-radius:10px; margin-bottom:0.3rem; }
+.critique-content { font-size:0.85rem; color:#333; white-space:pre-wrap; line-height:1.55; }
 </style>
 {% endblock %}

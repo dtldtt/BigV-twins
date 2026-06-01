@@ -171,8 +171,12 @@ async def stock_page(
     )
     _raw_entries = list(journal_rows.scalars())
     # Eagerly extract attributes to avoid lazy-load issues after session closes
+    from .journal import _parse_critique
     journal_entries = []
     for j in _raw_entries:
+        # 把 critique 解析成 [(date, content), ...]，最新在前
+        critique_entries = _parse_critique(j.self_critique)
+        critique_entries.reverse()  # 新日期在上
         journal_entries.append({
             "id": j.id,
             "action": j.action,
@@ -183,7 +187,7 @@ async def stock_page(
             "action_detail": j.action_detail,
             "target_price": j.target_price,
             "stop_loss_price": j.stop_loss_price,
-            "self_critique": j.self_critique,
+            "critique_entries": critique_entries,  # list of (date_iso_or_"legacy", content)
         })
 
     # Fetch ROE asynchronously (only A-share stocks, not ETF, not HK)
