@@ -230,17 +230,22 @@ def _build_portfolio(journals: list, price_map: dict, quote_map: dict,
                 total_buy_shares = shares
                 total_buy_amount = shares * price
             elif j.action == "reduce":
-                # Reduce: sell some shares at this price
+                # Reduce: 已实现盈亏锁进剩余成本 — total_cost 减"卖出收入"而不是
+                # avg cost × 卖出股数。这样卖高价后剩余仓位的成本会"变低"，
+                # 用户更直观看到 "之前涨那一波已经吃到了"。
+                # 例：买 100@¥58 + 100@¥60 (cost ¥11800) → 卖 100@¥75 (proceeds ¥7500)
+                #     剩余 100 股，cost = 11800 − 7500 = ¥4300，成本 ¥43/股
                 if total_shares > 0 and shares > 0:
-                    # Cost basis per share before this sale
-                    cost_per_share = total_cost / total_shares if total_shares else 0
                     sold_shares = min(shares, total_shares)
                     total_shares -= sold_shares
-                    total_cost -= sold_shares * cost_per_share
+                    total_cost -= sold_shares * price  # subtract PROCEEDS not avg cost
             elif j.action == "close":
-                # Full exit
+                # 一个完整 cycle 结束 — 重置全部状态（包括 buy_shares，因为下次
+                # 重新建仓时 "买入均价" 应该只看新 cycle）
                 total_shares = 0
                 total_cost = 0
+                total_buy_shares = 0
+                total_buy_amount = 0
 
         if total_shares <= 0:
             continue
@@ -366,7 +371,8 @@ async def journal_list(
             p = portfolio_by_ticker.get(ticker)
             card.update({
                 "current_shares": p["shares"] if p else 0,
-                "cost_basis": p["cost_basis"] if p else None,
+                "cost_basis": p["cost_basis"] if p else None,           # 已实现盈亏调整后的剩余成本
+                "avg_buy_price": p["avg_buy_price"] if p else None,    # 纯买入均价（不受卖出影响）
                 "current_price": price_map.get(ticker),
                 "market_value": p["market_value"] if p else 0,
                 "unrealized_pnl": p["pnl"] if p else None,

@@ -96,21 +96,22 @@
     {% for c in ticker_cards %}
     <details class="ticker-card {% if not c.any_active %}ticker-card-closed{% endif %}">
       <summary class="ticker-card-head">
-        <span class="tc-arrow">▶</span>
-        <strong class="tc-name">{{ c.ticker_name }}</strong>
-        <code class="tc-code">{{ c.ticker }}</code>
-        <a href="/stock/{{ c.ticker }}" class="tc-detail">详情 →</a>
-      </summary>
-      <div class="tc-body">
+        <div class="tc-title-row">
+          <span class="tc-arrow">▶</span>
+          <strong class="tc-name">{{ c.ticker_name }}</strong>
+          <code class="tc-code">{{ c.ticker }}</code>
+          <a href="/stock/{{ c.ticker }}" class="tc-detail">详情 →</a>
+        </div>
         <div class="tc-summary-row">
           {% if c.any_active %}
             <span class="tc-stat">持仓 <strong>{{ c.current_shares }}</strong> 股</span>
-            {% if c.cost_basis %}<span class="tc-stat">成本 ¥{{ "%.2f"|format(c.cost_basis) }}</span>{% endif %}
+            {% if c.cost_basis is not none %}<span class="tc-stat">成本 ¥{{ "%.2f"|format(c.cost_basis) }}</span>{% endif %}
+            {% if c.avg_buy_price is not none %}<span class="tc-stat">买入均价 ¥{{ "%.2f"|format(c.avg_buy_price) }}</span>{% endif %}
             {% if c.current_price %}<span class="tc-stat">现价 ¥{{ "%.2f"|format(c.current_price) }}</span>{% endif %}
             {% if c.market_value %}<span class="tc-stat">市值 ¥{{ "%.0f"|format(c.market_value) }}</span>{% endif %}
             {% if c.unrealized_pnl is not none %}
               <span class="tc-stat tc-pnl {% if c.unrealized_pnl > 0 %}up{% elif c.unrealized_pnl < 0 %}down{% endif %}">
-                浮盈 {{ "%+.0f"|format(c.unrealized_pnl) }}元
+                总盈亏 {{ "%+.0f"|format(c.unrealized_pnl) }}元
                 {% if c.unrealized_pct is not none %}({{ "%+.1f%%"|format(c.unrealized_pct) }}){% endif %}
               </span>
             {% endif %}
@@ -124,10 +125,12 @@
               </span>
             {% endif %}
           {% endif %}
+          <span class="tc-trade-count muted">{{ c.trade_count }} 笔操作 ▾</span>
         </div>
-
+      </summary>
+      <div class="tc-body">
         <div class="tc-trades">
-          {% for j in c.entries %}
+          {% for j in c.entries|reverse %}
           <div class="tc-trade">
             <a href="/journal/{{ j.id }}" class="tc-trade-line">
               <span class="trade-date">{{ j.created_at.strftime("%Y-%m-%d") if j.created_at else "" }}</span>
@@ -163,9 +166,23 @@
     记录你的投资心得、市场感悟、反思教训。不绑定具体交易，纯粹的思考记录。
   </p>
 
-  <!-- Write new note -->
-  <form method="post" action="/journal/note" style="margin-bottom:1.5rem">
-    <textarea name="content" rows="3" required placeholder="今天的投资感悟…比如：今天忍住没追高，感觉比以前有进步了。" style="width:100%; font-size:0.9rem"></textarea>
+  <!-- Write new note (with markdown toolbar) -->
+  <form method="post" action="/journal/note" style="margin-bottom:1.5rem" id="note-form">
+    <div class="md-toolbar">
+      <button type="button" data-md="bold" title="粗体"><b>B</b></button>
+      <button type="button" data-md="italic" title="斜体"><i>I</i></button>
+      <button type="button" data-md="h" title="标题">H</button>
+      <button type="button" data-md="code" title="代码">{ }</button>
+      <button type="button" data-md="link" title="链接">🔗</button>
+      <button type="button" data-md="list" title="列表">·</button>
+      <button type="button" data-md="quote" title="引用">❝</button>
+      <span style="flex:1"></span>
+      <button type="button" id="md-preview-toggle" title="切换预览">👁 预览</button>
+    </div>
+    <textarea name="content" rows="4" required id="note-input"
+              placeholder="支持 Markdown 语法：**粗体** *斜体* `代码` # 标题 - 列表 [链接](url) > 引用"
+              style="width:100%; font-size:0.9rem; font-family:inherit; border-top:none; border-radius:0 0 4px 4px"></textarea>
+    <div id="md-preview" class="md-rendered" style="display:none; padding:0.7rem; border:1px solid #ddd; border-top:none; border-radius:0 0 4px 4px; min-height:5rem; background:#fafafa"></div>
     <button type="submit" class="capital-btn" style="margin-top:0.3rem">记录</button>
   </form>
 
@@ -174,7 +191,7 @@
   <div class="notes-list">
     {% for n in notes %}
     <div class="note-item">
-      <div class="note-content">{{ n.content }}</div>
+      <div class="note-content md-rendered" data-md-source="{{ n.content }}">{{ n.content }}</div>
       <div class="note-meta">
         <small class="muted">{{ n.created_at.strftime("%Y-%m-%d %H:%M") if n.created_at else "" }}</small>
         <form method="post" action="/journal/note/{{ n.id }}/delete" style="display:inline; margin:0"
@@ -187,6 +204,57 @@
   </div>
   {% endif %}
 </section>
+
+<script>
+// === Markdown 工具栏：插入 markdown 语法到 textarea ===
+const _MD_WRAPS = {
+  bold:   ['**', '**', '粗体'],
+  italic: ['*', '*', '斜体'],
+  h:      ['## ', '', '标题'],
+  code:   ['`', '`', '代码'],
+  link:   ['[', '](url)', '链接文字'],
+  list:   ['- ', '', '列表项'],
+  quote:  ['> ', '', '引用'],
+};
+document.querySelectorAll('.md-toolbar [data-md]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const ta = document.getElementById('note-input');
+    if (!ta) return;
+    const start = ta.selectionStart, end = ta.selectionEnd;
+    const sel = ta.value.slice(start, end);
+    const w = _MD_WRAPS[btn.dataset.md];
+    if (!w) return;
+    const insert = w[0] + (sel || w[2]) + w[1];
+    ta.value = ta.value.slice(0, start) + insert + ta.value.slice(end);
+    ta.focus();
+    const after = start + w[0].length + (sel || w[2]).length;
+    ta.setSelectionRange(start + w[0].length, after);
+  });
+});
+
+// === 预览切换 ===
+document.getElementById('md-preview-toggle')?.addEventListener('click', () => {
+  const ta = document.getElementById('note-input');
+  const pv = document.getElementById('md-preview');
+  if (!ta || !pv || !window.marked || !window.DOMPurify) return;
+  if (pv.style.display === 'none') {
+    pv.innerHTML = DOMPurify.sanitize(marked.parse(ta.value || '_（空）_'));
+    pv.style.display = 'block';
+    ta.style.display = 'none';
+  } else {
+    pv.style.display = 'none';
+    ta.style.display = 'block';
+    ta.focus();
+  }
+});
+
+// === 已存随笔渲染：把每条 note-content 用 marked 渲染 ===
+document.querySelectorAll('.note-item .md-rendered').forEach(el => {
+  if (!window.marked || !window.DOMPurify) return;
+  const src = el.textContent;
+  el.innerHTML = DOMPurify.sanitize(marked.parse(src));
+});
+</script>
 
 <style>
 .capital-bar { background:#f0f7ff; border:1px solid #cce5ff; border-radius:6px; padding:0.6rem 1rem; margin-bottom:1.2rem; font-size:0.9rem; }
@@ -205,8 +273,27 @@
 .down { color:#43a047; }
 .notes-list { display:flex; flex-direction:column; gap:0.5rem; }
 .note-item { padding:0.7rem 1rem; background:#fafafa; border-radius:6px; border-left:3px solid #e0e0e0; }
-.note-content { font-size:0.9rem; white-space:pre-wrap; line-height:1.6; }
+.note-content { font-size:0.9rem; line-height:1.6; }
 .note-meta { display:flex; justify-content:space-between; align-items:center; margin-top:0.4rem; }
+
+/* Markdown 工具栏 */
+.md-toolbar { display:flex; gap:0.2rem; padding:0.3rem 0.5rem; background:#f5f5f5; border:1px solid #ddd; border-bottom:none; border-radius:4px 4px 0 0; align-items:center; }
+.md-toolbar button { padding:0.15rem 0.5rem; font-size:0.85rem; background:white; border:1px solid #ccc; border-radius:3px; cursor:pointer; margin:0 !important; width:auto !important; color:#444; }
+.md-toolbar button:hover { background:#e8f0ff; border-color:#1565c0; color:#1565c0; }
+#md-preview-toggle { font-size:0.8rem; }
+
+/* Markdown 渲染样式 */
+.md-rendered h1, .md-rendered h2, .md-rendered h3 { margin:0.6rem 0 0.3rem; }
+.md-rendered h1 { font-size:1.15rem; }
+.md-rendered h2 { font-size:1.05rem; }
+.md-rendered h3 { font-size:0.98rem; }
+.md-rendered p { margin:0.4rem 0; }
+.md-rendered ul, .md-rendered ol { margin:0.4rem 0; padding-left:1.5rem; }
+.md-rendered code { background:#eee; padding:0.05rem 0.3rem; border-radius:3px; font-size:0.85em; }
+.md-rendered pre { background:#f5f5f5; padding:0.6rem; border-radius:4px; overflow-x:auto; margin:0.4rem 0; }
+.md-rendered pre code { background:none; padding:0; }
+.md-rendered blockquote { margin:0.4rem 0; padding:0.2rem 0.8rem; border-left:3px solid #ccc; color:#666; }
+.md-rendered a { color:#1565c0; }
 
 /* === Filter tabs (持仓中 / 已清仓 / 全部) === */
 .filter-tabs { display:flex; gap:0; margin-bottom:0.8rem; border-bottom:2px solid #eee; }
@@ -220,17 +307,19 @@
 .ticker-card-list { display:flex; flex-direction:column; gap:0.5rem; }
 .ticker-card { border:1px solid #e0e0e0; border-radius:8px; overflow:hidden; }
 .ticker-card-closed { opacity:0.7; border-style:dashed; }
-.ticker-card-head { padding:0.7rem 1rem; cursor:pointer; list-style:none; display:flex; align-items:center; gap:0.6rem; }
+.ticker-card-head { padding:0.7rem 1rem; cursor:pointer; list-style:none; display:flex; flex-direction:column; gap:0.4rem; }
 .ticker-card-head::-webkit-details-marker { display:none; }
 .ticker-card[open] .ticker-card-head { background:#fafafa; border-bottom:1px solid #f0f0f0; }
 .ticker-card[open] .tc-arrow { transform:rotate(90deg); }
+.tc-title-row { display:flex; align-items:center; gap:0.6rem; }
 .tc-arrow { font-size:0.7rem; color:#888; transition:transform 0.15s; display:inline-block; }
 .tc-name { font-size:0.95rem; }
 .tc-code { font-size:0.78rem; color:#666; }
 .tc-detail { margin-left:auto; font-size:0.8rem; color:#1565c0; text-decoration:none; }
 .tc-detail:hover { text-decoration:underline; }
 .tc-body { padding:0.5rem 1rem 0.7rem; }
-.tc-summary-row { display:flex; flex-wrap:wrap; gap:0.7rem 1rem; padding:0.3rem 0 0.6rem; font-size:0.85rem; border-bottom:1px solid #f5f5f5; margin-bottom:0.5rem; }
+.tc-summary-row { display:flex; flex-wrap:wrap; gap:0.7rem 1rem; font-size:0.85rem; padding-left:1.4rem; }
+.tc-trade-count { font-size:0.75rem; margin-left:auto; }
 .tc-stat { color:#444; }
 .tc-stat strong { font-weight:600; }
 .tc-stat.muted { color:#888; }
