@@ -596,70 +596,36 @@ async def save_ticker_review(user_id: int, ticker: str, report_md: str) -> "Deci
 
 
 async def run_scheduled_reviews() -> int:
-    """daily 20:00 cron — 给所有有 active 持仓的 (user, ticker) 算一次回顾。
+    """每周六 20:00 cron — 给每个 user 的所有 active ticker 生成一份新的 per-ticker 回顾。
 
-    扫 decision_journal 找 next_review_at <= today 的 active 行，按 (user, ticker)
-    去重，每对生成一份 per-ticker 报告，写入 decision_review.ticker。
-    更新该 ticker 所有 active 行的 next_review_at（按 review_count 阶梯递增）。
+    v0.7+ 起改成固定周节奏：不再 gate next_review_at，每周扫一遍当前
+    所有 active 持仓的 (user, ticker)，无论之前回顾过多少次都重新做一份。
+    旧报告保留在 decision_review 表里（按时间倒序展示）。
     """
-    today = date.today().strftime("%Y-%m-%d")
     count = 0
 
     async with db._SessionFactory() as session:
         rows = await session.execute(
-            select(DecisionJournal).where(
+            select(DecisionJournal.user_id, DecisionJournal.ticker)
+            .where(
                 DecisionJournal.status == "active",
                 DecisionJournal.action != "dividend",
-                DecisionJournal.next_review_at <= today,
             )
+            .distinct()
         )
-        journals = list(rows.scalars())
+        pairs = [(r[0], r[1]) for r in rows]
 
-    # 按 (user, ticker) 去重
-    seen: set[tuple[int, str]] = set()
-    todo = []
-    for j in journals:
-        key = (j.user_id, j.ticker)
-        if key in seen:
-            continue
-        seen.add(key)
-        todo.append(j)
+    log.info("review engine (weekly): %d (user, ticker) to review", len(pairs))
 
-    log.info("review engine: %d (user, ticker) due for review", len(todo))
-
-    for j in todo:
+    for user_id, ticker in pairs:
         try:
-            report_md = await generate_review_for_ticker(j.user_id, j.ticker)
+            report_md = await generate_review_for_ticker(user_id, ticker)
         except Exception as e:
-            log.exception("ticker review failed user=%s ticker=%s: %s", j.user_id, j.ticker, e)
+            log.exception("ticker review failed user=%s ticker=%s: %s", user_id, ticker, e)
             continue
         if not report_md:
             continue
-
-        await save_ticker_review(j.user_id, j.ticker, report_md)
-
-        # 更新该 ticker 所有 active 行的 next_review_at
-        # review_count 用 decision_review 表里该 ticker 的累计计数
-        async with db._SessionFactory() as session:
-            n_existing = await session.scalar(
-                select(func.count()).select_from(DecisionReview).where(
-                    DecisionReview.user_id == j.user_id,
-                    DecisionReview.ticker == j.ticker,
-                )
-            )
-            next_idx = min(n_existing, len(_REVIEW_INTERVALS) - 1)
-            next_at = (date.today() + timedelta(days=_REVIEW_INTERVALS[next_idx])).strftime("%Y-%m-%d")
-            await session.execute(
-                update(DecisionJournal)
-                .where(
-                    DecisionJournal.user_id == j.user_id,
-                    DecisionJournal.ticker == j.ticker,
-                    DecisionJournal.status == "active",
-                    DecisionJournal.action != "dividend",
-                )
-                .values(next_review_at=next_at, review_count=n_existing)
-            )
-            await session.commit()
+        await save_ticker_review(user_id, ticker, report_md)
         count += 1
 
     log.info("review engine: generated %d ticker reviews", count)

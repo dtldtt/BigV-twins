@@ -115,8 +115,11 @@ async def lifespan(app: FastAPI):
                           id=f"ticker_brief_{jid}",
                           misfire_grace_time=1800, replace_existing=True)
     # Decision review — daily at 20:00
-    scheduler.add_job(run_scheduled_reviews, CronTrigger(hour=20, minute=0),
-                      id="decision_review", misfire_grace_time=1800, replace_existing=True)
+    # Per-ticker AI 回顾 — 每周六 20:00 跑（per-ticker，不再按 7→30→90→180 阶梯）
+    # 改成固定周节奏，每周一份新报告，旧报告按时间倒序保留
+    scheduler.add_job(run_scheduled_reviews,
+                      CronTrigger(day_of_week="sat", hour=20, minute=0),
+                      id="weekly_ticker_reviews", misfire_grace_time=3600, replace_existing=True)
 
     # A 股分红自动同步 — 每日 17:30（A 股收盘后），拉每个 user 的所有 A 股 ticker
     # 历史分红，找持仓期内已实施的事件，自动入账
