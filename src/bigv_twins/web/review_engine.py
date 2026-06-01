@@ -11,7 +11,7 @@ import json
 import logging
 from datetime import date, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, update, func
 
 from bigv_twins.config import settings
 
@@ -275,8 +275,333 @@ async def _call_qoder(prompt: str, journal_id: int) -> str | None:
 _REVIEW_INTERVALS = [7, 30, 90, 180]
 
 
+_TICKER_REVIEW_PROMPT = """你是一个投资回顾助手。下面是用户某只股票的全部操作历史，请生成事后回顾。
+
+【你的角色】
+观察者 + 引导者，不是裁判。亏损是反馈信息，不是错误。优势同样要点出。
+助用户看到自己整段持仓周期的轨迹。
+
+【语气硬约束】
+- **禁止贬损**：不说「不适合」「失败」「做错」「能力不足」
+- **改用成长型语言**：「在 X 上有提升空间」「框架可以继续打磨」
+- **优势要说**：用户做对的、坚持得好的，明确点出来夸
+
+【数据真实性硬约束】
+- 不要编造任何不在下面数据里的信息（PE / 市值 / 行业新闻 / 财报数字）
+- 引用数字必须出自下面"客观快照"段
+- {reasoning_constraint}
+
+# 标的：{ticker_name}（{ticker}）
+
+# 客观快照
+{stats_md}
+
+# 决策时基本面（首次建仓时）
+{fundamentals_then_section}
+# 当前基本面
+{fundamentals_now_section}
+# 同期沪深300
+{benchmark_section}
+
+# 全部操作（按时间顺序）
+{operations_md}
+
+# 决策后博主观点
+{opinions_section}
+
+# 用户对各操作的事后自评
+{critiques_md}
+
+---
+
+# 输出要求
+
+用 Markdown 输出 4 段，总长 400-700 字：
+
+## 1. 持仓全貌
+基于客观快照 + 操作列表，一段话讲清这只股票的持仓轨迹：何时建仓、加减过几次、当前状态、累计盈亏（含分红）。引用具体数字。
+
+## 2. 逻辑验证
+{verify_instruction}
+
+## 3. 结合用户自评的反思
+{self_critique_instruction}
+
+## 4. 下一步建议
+基于上述所有数据给一个**具体可执行**的下一步方向（继续持有 / 加仓 / 减仓 / 清仓），并说明理由。不要含糊地说"密切关注"。如果该股已清仓，本段改成"复盘要点"：从这段持仓里能带走的最重要的 1-2 条经验。
+"""
+
+
+async def generate_review_for_ticker(user_id: int, ticker: str) -> str | None:
+    """生成 per-ticker 综合回顾（覆盖该股全部操作）。
+
+    取当前 cycle 的所有 entries（最近一次 close 之后的；如果从没 close
+    过就是全部），整合成一份 Qoder performance 报告。
+    """
+    async with db._SessionFactory() as session:
+        rows = await session.execute(
+            select(DecisionJournal).where(
+                DecisionJournal.user_id == user_id,
+                DecisionJournal.ticker == ticker,
+            ).order_by(DecisionJournal.created_at)
+        )
+        all_entries = list(rows.scalars())
+    if not all_entries:
+        return None
+
+    # 找当前 cycle: 最后一次 close 之后的所有 entries（包括 dividend）
+    last_close_idx = -1
+    for i, e in enumerate(all_entries):
+        if e.action == "close":
+            last_close_idx = i
+    if last_close_idx >= 0:
+        # cycle entries = 最后 close 之前到 close 本身（一个完整 cycle）OR
+        # 之后到现在（一个新 cycle）
+        # 这里取 close 之后的；如果 close 是最后一条，cycle 就是从开始到 close
+        cycle_after = all_entries[last_close_idx + 1:]
+        if cycle_after:
+            entries = cycle_after  # 重开了新 cycle
+            cycle_status = "active"
+        else:
+            entries = all_entries  # 整个 history 一个 cycle (closed)
+            cycle_status = "closed"
+    else:
+        entries = all_entries
+        cycle_status = "active" if all_entries[-1].action != "close" else "closed"
+
+    latest = entries[-1]
+    ticker_name = latest.ticker_name
+
+    # 实时报价
+    loop = asyncio.get_running_loop()
+    quotes = await loop.run_in_executor(None, get_watchlist_quotes, [_FakeW(ticker)])
+    quote = quotes[0] if quotes else {}
+    current_price = quote.get("current")
+
+    # 客观快照计算
+    buys = [e for e in entries if e.action in ("open", "add", "retroactive")]
+    sells = [e for e in entries if e.action in ("reduce", "close")]
+    divs = [e for e in entries if e.action == "dividend"]
+    total_buy_cost = sum((b.price_at_decision or 0) * (b.shares or 0) for b in buys)
+    total_buy_shares = sum(b.shares or 0 for b in buys)
+    total_sell_proceeds = sum((s.price_at_decision or 0) * (s.shares or 0) for s in sells)
+    total_sell_shares = sum(s.shares or 0 for s in sells)
+    total_div_amount = sum((d.price_at_decision or 0) * (d.shares or 0) for d in divs)
+    cur_shares = total_buy_shares - total_sell_shares
+    avg_buy = total_buy_cost / total_buy_shares if total_buy_shares else 0
+    # adjusted cost (proceeds + dividends 反哺)
+    adj_cost_total = total_buy_cost - total_sell_proceeds - total_div_amount
+    adj_cost_per_share = adj_cost_total / cur_shares if cur_shares > 0 else 0
+    market_value = (current_price or 0) * cur_shares if cur_shares > 0 else 0
+    unrealized = (current_price - adj_cost_per_share) * cur_shares if (current_price and cur_shares > 0) else 0
+    earliest_date = entries[0].created_at.date() if entries[0].created_at else date.today()
+    days_held = (date.today() - earliest_date).days
+
+    stats_lines = [
+        f"- 当前 cycle 状态：{'持仓中' if cycle_status == 'active' else '已清仓'}",
+        f"- 持仓周期：{earliest_date} → 今天，共 {days_held} 天",
+        f"- 操作数：建仓/加仓 {len(buys)} 次 / 减仓清仓 {len(sells)} 次 / 分红 {len(divs)} 次",
+        f"- 累计买入：{total_buy_shares} 股，成本 ¥{total_buy_cost:.2f}（买入均价 ¥{avg_buy:.2f}）",
+        f"- 累计卖出：{total_sell_shares} 股，收回 ¥{total_sell_proceeds:.2f}",
+        f"- 累计分红：¥{total_div_amount:.2f}",
+    ]
+    if cur_shares > 0:
+        stats_lines.append(f"- 当前持仓：{cur_shares} 股，调整后成本 ¥{adj_cost_per_share:.2f}/股")
+        if current_price:
+            stats_lines.append(f"- 当前市值：¥{market_value:.0f}（现价 ¥{current_price:.2f}）")
+            stats_lines.append(f"- 浮动盈亏：¥{unrealized:+.0f}（{(unrealized/abs(adj_cost_total)*100 if adj_cost_total else 0):+.1f}%，已包含分红反哺）")
+    stats_md = "\n".join(stats_lines)
+
+    # 基本面
+    fundamentals_then_section = ""
+    first_open = next((e for e in entries if e.action in ("open", "retroactive")), None)
+    if first_open and first_open.stock_snapshot:
+        try:
+            snap = json.loads(first_open.stock_snapshot)
+            bits = []
+            if snap.get("pe") is not None:
+                bits.append(f"PE {snap['pe']:.1f}")
+            if snap.get("pb") is not None:
+                bits.append(f"PB {snap['pb']:.2f}")
+            if snap.get("market_cap") is not None:
+                bits.append(f"市值 {snap['market_cap']:.0f} 亿")
+            if bits:
+                fundamentals_then_section = f"- {' / '.join(bits)}（{first_open.created_at.date() if first_open.created_at else '?'}）\n"
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    fundamentals_now_section = ""
+    bits = []
+    if quote.get("pe") is not None:
+        bits.append(f"PE {quote['pe']:.1f}")
+    if quote.get("pb") is not None:
+        bits.append(f"PB {quote['pb']:.2f}")
+    if quote.get("market_cap") is not None:
+        bits.append(f"市值 {quote['market_cap']:.0f} 亿")
+    if bits:
+        fundamentals_now_section = f"- {' / '.join(bits)}\n"
+
+    # 沪深300 同期
+    benchmark_section = ""
+    try:
+        from .backtest import _fetch_benchmark_hist, _get_close_on_or_after
+        df = await loop.run_in_executor(
+            None, _fetch_benchmark_hist,
+            earliest_date.strftime("%Y%m%d"),
+            (date.today() + timedelta(days=1)).strftime("%Y%m%d"),
+        )
+        if df is not None and len(df) > 0:
+            start = _get_close_on_or_after(df, earliest_date.strftime("%Y-%m-%d"))
+            end = _get_close_on_or_after(df, date.today().strftime("%Y-%m-%d"))
+            if start and end:
+                csi_ret = (end[1] / start[1] - 1.0) * 100.0
+                benchmark_section = f"- 沪深300 同期涨跌：{csi_ret:+.1f}%\n"
+    except Exception as e:
+        log.warning("csi300 fetch for ticker review failed: %s", e)
+
+    # 操作列表
+    op_lines = []
+    for e in entries:
+        d = e.created_at.strftime("%Y-%m-%d") if e.created_at else "?"
+        action_zh = _ACTION_ZH.get(e.action, e.action)
+        if e.action == "dividend":
+            op_lines.append(f"- {d} 💸 派息 ¥{(e.price_at_decision or 0):.3f}/股 × {e.shares or 0} 股 = ¥{(e.price_at_decision or 0) * (e.shares or 0):.2f}")
+        else:
+            line = f"- {d} {action_zh} ¥{(e.price_at_decision or 0):.2f} × {e.shares or 0} 股"
+            if e.reasoning and e.reasoning.strip():
+                line += f"\n  理由：{e.reasoning[:200]}"
+            if e.action_detail and e.action_detail.strip():
+                line += f"\n  计划：{e.action_detail[:150]}"
+            op_lines.append(line)
+    operations_md = "\n".join(op_lines) if op_lines else "（无操作）"
+
+    # 决策后博主观点
+    opinions_section = ""
+    cutoff_str = earliest_date.strftime("%Y-%m-%d")
+    async with db._SessionFactory() as session:
+        opinion_rows = await session.execute(
+            select(TickerOpinionLog).where(
+                TickerOpinionLog.ticker == ticker,
+                TickerOpinionLog.opinion_date >= cutoff_str,
+            ).order_by(TickerOpinionLog.opinion_date.desc()).limit(8)
+        )
+        opinions = list(opinion_rows.scalars())
+    if opinions:
+        opinions_section = "\n".join(
+            f"- {op.opinion_date} [{op.blogger_slug}] {op.sentiment}: {op.summary}"
+            for op in opinions
+        )
+    else:
+        opinions_section = "（无博主观点）"
+
+    # 用户自评
+    crit_lines = []
+    for e in entries:
+        if e.self_critique and e.self_critique.strip():
+            d = e.created_at.strftime("%Y-%m-%d") if e.created_at else "?"
+            action_zh = _ACTION_ZH.get(e.action, e.action)
+            crit_lines.append(f"- 关于 {d} {action_zh} 的自评：\n  {e.self_critique[:400]}")
+    critiques_md = "\n".join(crit_lines) if crit_lines else "（用户未写过自评）"
+
+    # 验证措辞 + reasoning 约束
+    has_any_reasoning = any(e.reasoning and e.reasoning.strip() for e in entries if e.action != "dividend")
+    if has_any_reasoning:
+        verify_instruction = "对照各次操作的『理由』看：当初的判断到现在站得住吗？引用具体的客观快照数字。"
+        reasoning_constraint = "用户记录了部分理由，可以基于它做验证"
+    else:
+        verify_instruction = (
+            "用户没记录买卖理由。**严格禁止推测**当时的买入逻辑。"
+            "本段请改成纯客观数据点评：累计盈亏、加减仓节奏、跟沪深300 的差距。"
+            "陈述事实，不要替用户脑补当时心理活动。"
+        )
+        reasoning_constraint = (
+            "用户未记录理由 — **绝对不要推测**他当初为什么买（会误导他）。"
+            "在『逻辑验证』段只复述客观数据"
+        )
+
+    has_critique = any(e.self_critique and e.self_critique.strip() for e in entries)
+    if has_critique:
+        self_critique_instruction = (
+            "用户已经写过上述自评。把它跟客观数据对照：哪些观察一致？"
+            "哪些用户没注意到但数据能体现？给一段综合反思（不要简单复述用户原话）。"
+        )
+    else:
+        self_critique_instruction = (
+            "用户还没在这只股票上写过自评。基于客观数据指出最值得用户事后写一笔自评的点（"
+            "比如：仓位太重、卖飞、未及时止损）。"
+        )
+
+    prompt = _TICKER_REVIEW_PROMPT.format(
+        ticker=ticker,
+        ticker_name=ticker_name,
+        stats_md=stats_md,
+        fundamentals_then_section=fundamentals_then_section or "（无快照数据）",
+        fundamentals_now_section=fundamentals_now_section or "（拉取失败）",
+        benchmark_section=benchmark_section or "（拉取失败）",
+        operations_md=operations_md,
+        opinions_section=opinions_section,
+        critiques_md=critiques_md,
+        verify_instruction=verify_instruction,
+        reasoning_constraint=reasoning_constraint,
+        self_critique_instruction=self_critique_instruction,
+    )
+
+    return await _call_qoder(prompt, hash(ticker))
+
+
+async def save_ticker_review(user_id: int, ticker: str, report_md: str) -> "DecisionReview":
+    """把生成好的 markdown 存到 decision_review 表（per-ticker），返回 ORM 对象。
+
+    注意：SQLite ALTER 不能改 NOT NULL 约束，journal_id 依然是必填，
+    所以这里塞最近一次该 ticker 的 active 操作 id（不是真的"绑死"那笔操作，
+    只是为了满足 schema），主键关联还是看 ticker 字段。
+    """
+    loop = asyncio.get_running_loop()
+    quotes = await loop.run_in_executor(None, get_watchlist_quotes, [_FakeW(ticker)])
+    cur_price = quotes[0].get("current") if quotes else None
+    async with db._SessionFactory() as s:
+        # 找一个该 ticker 的 journal id 来满足 NOT NULL 约束
+        any_j = await s.scalar(
+            select(DecisionJournal.id).where(
+                DecisionJournal.user_id == user_id,
+                DecisionJournal.ticker == ticker,
+            ).order_by(DecisionJournal.created_at.desc()).limit(1)
+        )
+        rows = await s.execute(
+            select(DecisionReview).where(
+                DecisionReview.user_id == user_id,
+                DecisionReview.ticker == ticker,
+            ).order_by(DecisionReview.created_at.desc())
+        )
+        prior = list(rows.scalars())
+        review_count = len(prior)
+        if review_count == 0: review_type = "1week"
+        elif review_count == 1: review_type = "1month"
+        elif review_count == 2: review_type = "3month"
+        else: review_type = "6month"
+        if review_count > 8:
+            review_type = "manual"
+        review = DecisionReview(
+            journal_id=any_j,  # placeholder to satisfy NOT NULL
+            ticker=ticker,
+            user_id=user_id,
+            review_type=review_type,
+            current_price=cur_price,
+            review_report_md=report_md,
+        )
+        s.add(review)
+        await s.commit()
+        await s.refresh(review)
+    return review
+
+
 async def run_scheduled_reviews() -> int:
-    """Scan journals due for review, generate reports. Called daily by APScheduler."""
+    """daily 20:00 cron — 给所有有 active 持仓的 (user, ticker) 算一次回顾。
+
+    扫 decision_journal 找 next_review_at <= today 的 active 行，按 (user, ticker)
+    去重，每对生成一份 per-ticker 报告，写入 decision_review.ticker。
+    更新该 ticker 所有 active 行的 next_review_at（按 review_count 阶梯递增）。
+    """
     today = date.today().strftime("%Y-%m-%d")
     count = 0
 
@@ -284,56 +609,58 @@ async def run_scheduled_reviews() -> int:
         rows = await session.execute(
             select(DecisionJournal).where(
                 DecisionJournal.status == "active",
+                DecisionJournal.action != "dividend",
                 DecisionJournal.next_review_at <= today,
             )
         )
         journals = list(rows.scalars())
 
-    log.info("review engine: %d journals due for review", len(journals))
+    # 按 (user, ticker) 去重
+    seen: set[tuple[int, str]] = set()
+    todo = []
+    for j in journals:
+        key = (j.user_id, j.ticker)
+        if key in seen:
+            continue
+        seen.add(key)
+        todo.append(j)
 
-    for journal in journals:
-        report_md = await generate_review_for_journal(journal)
+    log.info("review engine: %d (user, ticker) due for review", len(todo))
+
+    for j in todo:
+        try:
+            report_md = await generate_review_for_ticker(j.user_id, j.ticker)
+        except Exception as e:
+            log.exception("ticker review failed user=%s ticker=%s: %s", j.user_id, j.ticker, e)
+            continue
         if not report_md:
             continue
 
-        # Determine review type
-        review_count = journal.review_count or 0
-        if review_count == 0:
-            review_type = "1week"
-        elif review_count == 1:
-            review_type = "1month"
-        elif review_count == 2:
-            review_type = "3month"
-        else:
-            review_type = "6month"
+        await save_ticker_review(j.user_id, j.ticker, report_md)
 
-        # Get current price for record
-        quotes = get_watchlist_quotes([_FakeW(journal.ticker)])
-        current_price = quotes[0].get("current") if quotes else None
-        pnl_pct = None
-        if current_price and journal.price_at_decision:
-            pnl_pct = (current_price - journal.price_at_decision) / journal.price_at_decision * 100
-
-        # Save review
+        # 更新该 ticker 所有 active 行的 next_review_at
+        # review_count 用 decision_review 表里该 ticker 的累计计数
         async with db._SessionFactory() as session:
-            review = DecisionReview(
-                journal_id=journal.id,
-                user_id=journal.user_id,
-                review_type=review_type,
-                current_price=current_price,
-                price_change_pct=pnl_pct,
-                review_report_md=report_md,
+            n_existing = await session.scalar(
+                select(func.count()).select_from(DecisionReview).where(
+                    DecisionReview.user_id == j.user_id,
+                    DecisionReview.ticker == j.ticker,
+                )
             )
-            session.add(review)
-
-            # Update journal: next review date + increment count
-            j = await session.get(DecisionJournal, journal.id)
-            j.review_count = review_count + 1
-            next_idx = min(review_count + 1, len(_REVIEW_INTERVALS) - 1)
-            j.next_review_at = (date.today() + timedelta(days=_REVIEW_INTERVALS[next_idx])).strftime("%Y-%m-%d")
-
+            next_idx = min(n_existing, len(_REVIEW_INTERVALS) - 1)
+            next_at = (date.today() + timedelta(days=_REVIEW_INTERVALS[next_idx])).strftime("%Y-%m-%d")
+            await session.execute(
+                update(DecisionJournal)
+                .where(
+                    DecisionJournal.user_id == j.user_id,
+                    DecisionJournal.ticker == j.ticker,
+                    DecisionJournal.status == "active",
+                    DecisionJournal.action != "dividend",
+                )
+                .values(next_review_at=next_at, review_count=n_existing)
+            )
             await session.commit()
-            count += 1
+        count += 1
 
-    log.info("review engine: generated %d reviews", count)
+    log.info("review engine: generated %d ticker reviews", count)
     return count

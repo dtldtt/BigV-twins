@@ -206,6 +206,16 @@ async def stock_page(
     # Stock name: prefer from quote, fallback to ticker
     stock_name = quote.get("name") or ticker
 
+    # Per-ticker reviews（v0.7+）+ legacy per-journal reviews (兼容)
+    from .db import DecisionReview
+    rev_rows = await session.execute(
+        select(DecisionReview).where(
+            DecisionReview.user_id == user.id,
+            DecisionReview.ticker == ticker,
+        ).order_by(DecisionReview.created_at.desc()).limit(10)
+    )
+    ticker_reviews = list(rev_rows.scalars())
+
     return templates.TemplateResponse(
         request=request,
         name="stock.html",
@@ -220,5 +230,21 @@ async def stock_page(
             "journal_entries": journal_entries,
             "ticker_type": ticker_type,
             "roe": roe,
+            "ticker_reviews": ticker_reviews,
         },
     )
+
+
+@router.post("/{ticker}/review/now")
+async def stock_review_now(
+    request: Request,
+    ticker: str,
+    user: Annotated[User, Depends(auth.require_user)],
+    session: Annotated[AsyncSession, Depends(db.get_session)],
+):
+    """手动触发 per-ticker 回顾。"""
+    from .review_engine import generate_review_for_ticker, save_ticker_review
+    report_md = await generate_review_for_ticker(user.id, ticker)
+    if report_md:
+        await save_ticker_review(user.id, ticker, report_md)
+    return RedirectResponse(f"/stock/{ticker}", status_code=303)

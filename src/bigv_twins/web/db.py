@@ -408,11 +408,15 @@ class TickerOpinionLog(Base):
 
 
 class DecisionReview(Base):
-    """决策回顾记录 — 定期自动生成的投资决策回顾。"""
+    """决策回顾记录 — v0.7 起改 per-ticker：覆盖该股 ticker 的所有操作。
+
+    journal_id 兼容老版（可空）；新版用 ticker 关联到一只股票而非单笔操作。
+    """
     __tablename__ = "decision_review"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    journal_id: Mapped[int] = mapped_column(ForeignKey("decision_journal.id"), nullable=False, index=True)
+    journal_id: Mapped[int | None] = mapped_column(ForeignKey("decision_journal.id"), nullable=True, index=True)  # legacy
+    ticker: Mapped[str | None] = mapped_column(String(16), nullable=True, index=True)  # v0.7 新主键
     user_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     review_type: Mapped[str] = mapped_column(String(20), nullable=False)
     current_price: Mapped[float | None] = mapped_column(Float, nullable=True)
@@ -530,6 +534,13 @@ async def init_db() -> None:
                 )
             except Exception:
                 pass
+        # v0.7: decision_review.ticker — per-ticker reviews（替代 per-journal）
+        try:
+            await conn.exec_driver_sql(
+                "ALTER TABLE decision_review ADD COLUMN ticker VARCHAR(16)"
+            )
+        except Exception:
+            pass
         # 一次性把老 total_capital (万元) 迁到 cny_principal (元) — 仅当 cny_principal 还是 0 时
         try:
             await conn.exec_driver_sql(

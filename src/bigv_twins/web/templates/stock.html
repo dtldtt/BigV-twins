@@ -85,6 +85,45 @@
 </section>
 {% endif %}
 
+<!-- AI 回顾报告（per-ticker 综合，v0.7） -->
+{% if journal_entries %}
+<section class="stock-section">
+  <div style="display:flex; align-items:center; justify-content:space-between">
+    <h3 style="margin:0">📋 AI 回顾报告</h3>
+    <form method="post" action="/stock/{{ ticker }}/review/now" style="margin:0">
+      <button type="submit" class="secondary outline" style="padding:0.3rem 0.8rem; font-size:0.8rem; margin:0; width:auto">
+        🔁 生成新回顾（约 30s）
+      </button>
+    </form>
+  </div>
+  {% if ticker_reviews %}
+  <p class="muted" style="font-size:0.8rem; margin-top:-0.3rem">
+    Qoder performance 综合该股全部操作 + 自评 + 客观快照生成。最新在最上。
+  </p>
+  {% for r in ticker_reviews %}
+  <details class="ticker-review" {% if loop.first %}open{% endif %}>
+    <summary>
+      <span class="rev-type">
+        {% if r.review_type == '1week' %}1 周回顾
+        {% elif r.review_type == '1month' %}1 月回顾
+        {% elif r.review_type == '3month' %}3 月回顾
+        {% elif r.review_type == '6month' %}半年回顾
+        {% else %}手动回顾{% endif %}
+      </span>
+      <small class="muted">{{ r.created_at.strftime("%Y-%m-%d %H:%M") if r.created_at else "" }}</small>
+      {% if r.current_price %}<small class="muted">现价 ¥{{ "%.2f"|format(r.current_price) }}</small>{% endif %}
+    </summary>
+    <div class="rev-body md-rendered" data-raw="{{ r.review_report_md or '' }}">{{ r.review_report_md or '' }}</div>
+  </details>
+  {% endfor %}
+  {% else %}
+  <p class="muted" style="font-size:0.85rem; padding:1rem; background:#fafafa; border-radius:6px">
+    还没有 AI 回顾。点上面「🔁 生成新回顾」立即触发，或等每日 20:00 cron 自动生成（按 7→30→90→180 天阶梯）。
+  </p>
+  {% endif %}
+</section>
+{% endif %}
+
 <!-- Decision Journal -->
 <section class="stock-section">
   <h3>📝 我的操作记录 ({{ journal_entries|length }}条)</h3>
@@ -260,5 +299,27 @@ td.down { color:#43a047; }
 .critique-row + .critique-row { border-top:1px dotted #eee; }
 .critique-date { color:#888; font-size:0.72rem; font-family:'SF Mono','Consolas',monospace; flex-shrink:0; min-width:5.5rem; }
 .critique-content { color:#333; white-space:pre-wrap; line-height:1.55; flex:1; }
+/* AI 回顾报告 */
+.ticker-review { border:1px solid #e0e0e0; border-radius:6px; margin-bottom:0.5rem; }
+.ticker-review > summary { padding:0.5rem 0.8rem; cursor:pointer; list-style:none; display:flex; gap:0.7rem; align-items:center; }
+.ticker-review > summary::-webkit-details-marker { display:none; }
+.ticker-review > summary::before { content:'▶ '; font-size:0.7rem; color:#888; margin-right:0.2rem; }
+.ticker-review[open] > summary::before { content:'▼ '; }
+.ticker-review[open] > summary { background:#fafafa; border-bottom:1px solid #eee; }
+.rev-type { font-weight:600; font-size:0.88rem; color:#1565c0; }
+.rev-body { padding:0.8rem 1rem; line-height:1.65; font-size:0.88rem; }
+.rev-body h1, .rev-body h2 { font-size:1rem; margin:0.7rem 0 0.3rem; }
+.rev-body h3 { font-size:0.95rem; margin:0.6rem 0 0.3rem; }
+.rev-body p { margin:0.4rem 0; }
+.rev-body ul { padding-left:1.5rem; margin:0.4rem 0; }
 </style>
+
+<script>
+// 渲染 AI 回顾的 markdown
+document.querySelectorAll('.rev-body.md-rendered').forEach(el => {
+  if (!window.marked || !window.DOMPurify) return;
+  const src = el.dataset.raw || el.textContent;
+  el.innerHTML = DOMPurify.sanitize(marked.parse(src));
+});
+</script>
 {% endblock %}

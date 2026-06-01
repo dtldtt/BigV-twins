@@ -131,6 +131,17 @@
         </div>
       </summary>
       <div class="tc-body">
+        {% if c.latest_review %}
+        <details class="tc-review-block" open>
+          <summary>
+            📋 <strong>最近一次 AI 回顾</strong>
+            <small class="muted">{{ c.latest_review.created_at.strftime("%Y-%m-%d") if c.latest_review.created_at else "" }}</small>
+            <a href="/stock/{{ c.ticker }}#review" onclick="event.stopPropagation()" class="tc-review-link">查看全部 →</a>
+          </summary>
+          <div class="tc-review-md md-rendered" data-raw="{{ c.latest_review.review_report_md or '' }}">{{ c.latest_review.review_report_md or '' }}</div>
+        </details>
+        {% endif %}
+
         <div class="tc-trades">
           {% for j in c.entries|reverse %}
           <div class="tc-trade">
@@ -282,8 +293,8 @@ document.getElementById('md-preview-toggle')?.addEventListener('click', () => {
   }
 });
 
-// === 已存随笔渲染：把每条 note-content 用 marked 渲染 ===
-document.querySelectorAll('.note-item .md-rendered').forEach(el => {
+// === 渲染所有 markdown 内容（随笔 + AI 回顾） ===
+document.querySelectorAll('.md-rendered').forEach(el => {
   if (!window.marked || !window.DOMPurify) return;
   const src = el.dataset.raw || el.textContent;
   el.innerHTML = DOMPurify.sanitize(marked.parse(src));
@@ -429,5 +440,16 @@ function toggleNoteEdit(btnOrItem, nid, cancel) {
 .journal-action-open, .journal-action-add, .journal-action-retroactive { background:#e8f5e9; color:#2e7d32; }
 .journal-action-reduce, .journal-action-close { background:#ffebee; color:#c62828; }
 .journal-action-dividend { background:#fff8e1; color:#7a5c00; }
+
+/* 最新 AI 回顾（在 /journal 卡片内） */
+.tc-review-block { background:#f8f9fa; border-left:3px solid #1565c0; border-radius:0 6px 6px 0; padding:0.5rem 0.8rem; margin-bottom:0.6rem; }
+.tc-review-block > summary { cursor:pointer; list-style:none; display:flex; gap:0.6rem; align-items:center; font-size:0.85rem; }
+.tc-review-block > summary::-webkit-details-marker { display:none; }
+.tc-review-link { font-size:0.78rem; color:#1565c0; text-decoration:none; margin-left:auto; }
+.tc-review-link:hover { text-decoration:underline; }
+.tc-review-md { padding:0.5rem 0; font-size:0.85rem; line-height:1.6; }
+.tc-review-md h2, .tc-review-md h3 { font-size:0.9rem; margin:0.5rem 0 0.2rem; }
+.tc-review-md p { margin:0.3rem 0; }
+.tc-review-md ul { padding-left:1.3rem; margin:0.3rem 0; }
 </style>
 {% endblock %}

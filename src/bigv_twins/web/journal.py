@@ -403,6 +403,21 @@ async def journal_list(
         sub = sorted(by_mo.items(), key=lambda x: x[0], reverse=True)
         notes_year_sections.append({"year": yr, "total": len(ns), "months": sub})
 
+    # 拉每只 ticker 最新一份 AI 回顾（per-ticker）
+    from .db import DecisionReview
+    latest_reviews_q = await session.execute(
+        select(DecisionReview)
+        .where(
+            DecisionReview.user_id == user.id,
+            DecisionReview.ticker.isnot(None),
+        )
+        .order_by(DecisionReview.created_at.desc())
+    )
+    latest_review_per_ticker: dict[str, DecisionReview] = {}
+    for r in latest_reviews_q.scalars():
+        if r.ticker and r.ticker not in latest_review_per_ticker:
+            latest_review_per_ticker[r.ticker] = r
+
     # === 给每只 ticker 算卡片显示需要的所有字段 ===
     ticker_cards = []
     total_realized_pnl = 0.0
@@ -447,6 +462,7 @@ async def journal_list(
             "latest_date": latest.created_at,
             "realized_pnl": realized_pnl if sells else 0,
             "realized_pct": (realized_pnl / (avg_cost * realized_sold_shares) * 100) if avg_cost and realized_sold_shares else None,
+            "latest_review": latest_review_per_ticker.get(ticker),  # 最新 AI 回顾（per-ticker）
         }
 
         if any_active:
