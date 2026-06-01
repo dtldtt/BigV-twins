@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Annotated
@@ -623,6 +624,50 @@ async def journal_quick_edit(
     return RedirectResponse(redirect_to, status_code=303)
 
 
+_CRITIQUE_DATE_RE = re.compile(r"^\[(\d{4}-\d{2}-\d{2})\]\s*(.*)$", re.S)
+
+
+def _parse_critique(text: str | None) -> list[tuple[str, str]]:
+    """把 self_critique 解析为 [(date_iso_or_'legacy', content), ...]。
+
+    新格式每段以 [YYYY-MM-DD] 开头。老数据（裸文本或老的「[M月D日 追加评价]」
+    格式）按段落保留为 legacy 块，不丢内容。
+    """
+    if not text or not text.strip():
+        return []
+    blocks = [b.strip() for b in text.split("\n\n") if b.strip()]
+    out: list[tuple[str, str]] = []
+    for blk in blocks:
+        m = _CRITIQUE_DATE_RE.match(blk)
+        if m:
+            out.append((m.group(1), m.group(2).strip()))
+        else:
+            out.append(("legacy", blk))
+    return out
+
+
+def _serialize_critique(entries: list[tuple[str, str]]) -> str:
+    pieces = []
+    for d, c in entries:
+        if d == "legacy":
+            pieces.append(c)
+        else:
+            pieces.append(f"[{d}] {c}")
+    return "\n\n".join(pieces)
+
+
+def _append_critique(existing: str | None, new_text: str) -> str:
+    """追加一条评价。同一天的多次评价合并到当日 block，用「；」分隔。"""
+    today = date.today().strftime("%Y-%m-%d")
+    entries = _parse_critique(existing)
+    if entries and entries[-1][0] == today:
+        d, c = entries[-1]
+        entries[-1] = (d, c + "；" + new_text)
+    else:
+        entries.append((today, new_text))
+    return _serialize_critique(entries)
+
+
 @router.post("/{jid}/critique")
 async def journal_critique(
     request: Request,
@@ -632,20 +677,14 @@ async def journal_critique(
     critique: str = Form(...),
     redirect_to: str = Form("/journal"),
 ):
-    """追加一条自评，自动按 "[M月D日 追加评价] ..." 拼接到 self_critique。"""
+    """追加一条自评。每条带 [YYYY-MM-DD] 日期前缀，同日多次合并。"""
     journal = await session.get(DecisionJournal, jid)
     if not journal or journal.user_id != user.id:
         raise HTTPException(status_code=404)
     new_text = critique.strip()
     if not new_text:
         return RedirectResponse(redirect_to, status_code=303)
-    from datetime import date
-    today = date.today()
-    if journal.self_critique:
-        prefix = f"[{today.month}月{today.day}日 追加评价] "
-        journal.self_critique = journal.self_critique + "\n\n" + prefix + new_text
-    else:
-        journal.self_critique = new_text
+    journal.self_critique = _append_critique(journal.self_critique, new_text)
     await session.commit()
     return RedirectResponse(redirect_to, status_code=303)
 

@@ -183,6 +183,7 @@ async def stock_page(
             "action_detail": j.action_detail,
             "target_price": j.target_price,
             "stop_loss_price": j.stop_loss_price,
+            "self_critique": j.self_critique,
         })
 
     # Fetch ROE asynchronously (only A-share stocks, not ETF, not HK)
