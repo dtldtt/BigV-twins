@@ -435,6 +435,30 @@ class InvestmentNote(Base):
     user: Mapped[User] = relationship()
 
 
+class GrowthReport(Base):
+    """投资成长复盘 — 跨时段把交易 + 自评 + 随笔 + 单笔回顾综合做总结。
+
+    period_type: 'month' / 'quarter' / 'manual'
+    stats_json: 客观数据快照（盈亏、胜率、持仓天数等）
+    key_lessons_json: 提炼出的可执行规则数组（积累成个人知识库）
+    """
+    __tablename__ = "growth_reports"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    period_type: Mapped[str] = mapped_column(String(16), nullable=False)
+    period_start: Mapped[str] = mapped_column(String(10), nullable=False)
+    period_end: Mapped[str] = mapped_column(String(10), nullable=False)
+    report_md: Mapped[str | None] = mapped_column(Text, nullable=True)
+    stats_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    key_lessons_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+
+    user: Mapped[User] = relationship()
+
+
 
 class TokenUsageHourly(Base):
     """每小时 token 用量汇总（从 OpenClaw session JSONL 扫描得到）."""

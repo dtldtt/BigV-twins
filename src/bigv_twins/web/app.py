@@ -33,6 +33,8 @@ from .search import rebuild_search_index, router as search_router
 from .journal import router as journal_router
 from .stock import router as stock_router
 from .consensus import router as consensus_router
+from .growth import router as growth_router
+from .reflection_engine import run_monthly_growth_reports, run_quarterly_growth_reports
 from .timeline import router as timeline_router
 from .review_engine import run_scheduled_reviews
 from .token_usage import refresh_token_usage
@@ -115,6 +117,13 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(run_scheduled_reviews, CronTrigger(hour=20, minute=0),
                       id="decision_review", misfire_grace_time=1800, replace_existing=True)
 
+    # 成长复盘 — 月度（每月 1 号 09:00 跑上月）+ 季度（1/4/7/10 月 1 号 09:30 跑上季）
+    scheduler.add_job(run_monthly_growth_reports, CronTrigger(day=1, hour=9, minute=0),
+                      id="growth_monthly", misfire_grace_time=3600, replace_existing=True)
+    scheduler.add_job(run_quarterly_growth_reports,
+                      CronTrigger(month="1,4,7,10", day=1, hour=9, minute=30),
+                      id="growth_quarterly", misfire_grace_time=3600, replace_existing=True)
+
     # Token usage tracker — hourly (no LLM, just scan jsonl)
     scheduler.add_job(refresh_token_usage, IntervalTrigger(hours=1),
                       id="token_usage_refresh", misfire_grace_time=600, replace_existing=True)
@@ -173,6 +182,7 @@ def create_app() -> FastAPI:
     app.include_router(stock_router)
     app.include_router(timeline_router)
     app.include_router(consensus_router)
+    app.include_router(growth_router)
 
     @app.get("/changelog", response_class=HTMLResponse)
     async def changelog_page(

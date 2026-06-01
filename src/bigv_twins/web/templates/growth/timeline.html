@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}📚 投资成长复盘{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ul>
+    <li><a href="/">首页</a></li>
+    <li>成长复盘</li>
+  </ul>
+</nav>
+
+<h2>📚 投资成长复盘</h2>
+<p class="muted" style="margin-top:-0.5rem">
+  把你的全部交易 + 自评 + 随笔综合成跨时段的成长报告。月度 / 季度自动生成，也可以手动跑。
+</p>
+
+<section style="margin-top:1.5rem; padding:0.8rem 1rem; background:#f8f9fa; border-radius:6px">
+  <strong>手动生成</strong>
+  <form method="post" action="/growth/new" style="display:inline-flex; gap:0.5rem; margin-left:1rem; align-items:center">
+    <select name="period" style="width:auto; padding:0.3rem 0.5rem; font-size:0.85rem; margin:0">
+      <option value="month">上个月</option>
+      <option value="quarter">上个季度</option>
+    </select>
+    <button type="submit" style="padding:0.3rem 1rem; font-size:0.85rem; margin:0; width:auto">生成报告</button>
+  </form>
+  <small class="muted" style="margin-left:1rem">⏱ 约需 20-40 秒（Qoder performance 推理）</small>
+</section>
+
+{% if all_lessons %}
+<section style="margin-top:1.5rem">
+  <h3>📖 个人知识库 ({{ all_lessons|length }} 条规则)</h3>
+  <p class="muted" style="font-size:0.85rem; margin-top:-0.3rem">从你历次自评和随笔里提炼，按时间倒序</p>
+  <ul class="lessons-list">
+    {% for lesson, label, rid in all_lessons %}
+    <li><span class="lesson-text">{{ lesson }}</span> <small class="muted">— <a href="/growth/{{ rid }}">{{ label }}</a></small></li>
+    {% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<section style="margin-top:1.5rem">
+  <h3>📅 历次报告</h3>
+  {% if reports %}
+  <div class="report-list">
+    {% for r in reports %}
+    <a href="/growth/{{ r.id }}" class="report-card">
+      <div class="report-head">
+        <span class="period-badge period-{{ r.period_type }}">
+          {% if r.period_type == 'month' %}月报
+          {% elif r.period_type == 'quarter' %}季报
+          {% else %}手动{% endif %}
+        </span>
+        <strong>{{ r.period_start }} → {{ r.period_end }}</strong>
+        <small class="muted" style="margin-left:auto">{{ r.created_at.strftime("%Y-%m-%d %H:%M") if r.created_at else "" }}</small>
+      </div>
+      <div class="report-snippet">{{ (r.report_md or '')[:200] }}{% if (r.report_md or '')|length > 200 %}…{% endif %}</div>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted" style="text-align:center; padding:2rem">还没有报告。点击上方"生成报告"试试。</p>
+  {% endif %}
+</section>
+
+<style>
+.lessons-list { list-style:none; padding-left:0; }
+.lessons-list li { padding:0.4rem 0.7rem; background:#fffdf6; border-left:3px solid #ffd54f; border-radius:0 3px 3px 0; margin-bottom:0.4rem; font-size:0.9rem; }
+.lesson-text { font-weight:500; color:#333; }
+.report-list { display:flex; flex-direction:column; gap:0.6rem; }
+.report-card { display:block; padding:0.8rem 1rem; border:1px solid #e0e0e0; border-radius:8px; text-decoration:none; color:inherit; }
+.report-card:hover { box-shadow:0 2px 6px rgba(0,0,0,0.08); }
+.report-head { display:flex; align-items:center; gap:0.7rem; margin-bottom:0.4rem; font-size:0.88rem; }
+.period-badge { font-size:0.75rem; padding:0.15rem 0.5rem; border-radius:3px; }
+.period-month { background:#e3f2fd; color:#1565c0; }
+.period-quarter { background:#f3e5f5; color:#7b1fa2; }
+.period-manual { background:#f5f5f5; color:#666; }
+.report-snippet { font-size:0.82rem; color:#555; line-height:1.5; white-space:pre-wrap; max-height:5em; overflow:hidden; }
+</style>
+{% endblock %}

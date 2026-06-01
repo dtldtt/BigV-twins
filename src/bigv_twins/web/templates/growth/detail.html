@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}成长复盘 · {{ report.period_start }} → {{ report.period_end }}{% endblock %}
+
+{% block content %}
+<nav aria-label="breadcrumb">
+  <ul>
+    <li><a href="/growth">← 成长复盘</a></li>
+    <li>{{ report.period_start }} → {{ report.period_end }}</li>
+  </ul>
+</nav>
+
+<header style="display:flex; align-items:baseline; gap:1rem; margin-bottom:1rem">
+  <h2 style="margin:0">
+    {% if report.period_type == 'month' %}📅 月报
+    {% elif report.period_type == 'quarter' %}📅 季报
+    {% else %}🖐️ 手动报告{% endif %}
+  </h2>
+  <strong>{{ report.period_start }} → {{ report.period_end }}</strong>
+  <small class="muted" style="margin-left:auto">生成于 {{ report.created_at.strftime("%Y-%m-%d %H:%M") if report.created_at else "" }}</small>
+</header>
+
+{% if stats %}
+<details class="stats-panel" open>
+  <summary><strong>📊 原始数据快照</strong></summary>
+  <div class="stats-grid">
+    {% if stats.realized_pnl_yuan is not none %}
+    <div class="stat"><small>已实现盈亏</small><strong class="{% if stats.realized_pnl_yuan > 0 %}up{% elif stats.realized_pnl_yuan < 0 %}down{% endif %}">¥{{ "%+.0f"|format(stats.realized_pnl_yuan) }}</strong></div>
+    {% endif %}
+    {% if stats.unrealized_pnl_yuan is not none %}
+    <div class="stat"><small>浮动盈亏</small><strong class="{% if stats.unrealized_pnl_yuan > 0 %}up{% elif stats.unrealized_pnl_yuan < 0 %}down{% endif %}">¥{{ "%+.0f"|format(stats.unrealized_pnl_yuan) }}</strong></div>
+    {% endif %}
+    {% if stats.win_rate_pct is not none %}
+    <div class="stat"><small>本期胜率</small><strong>{{ stats.win_rate_pct }}%</strong></div>
+    {% endif %}
+    {% if stats.avg_hold_days is not none %}
+    <div class="stat"><small>平均持仓</small><strong>{{ stats.avg_hold_days }} 天</strong></div>
+    {% endif %}
+    {% if stats.csi300_return_pct is not none %}
+    <div class="stat"><small>同期沪深300</small><strong class="{% if stats.csi300_return_pct > 0 %}up{% elif stats.csi300_return_pct < 0 %}down{% endif %}">{{ "%+.2f"|format(stats.csi300_return_pct) }}%</strong></div>
+    {% endif %}
+    <div class="stat"><small>清仓 / 在手</small><strong>{{ stats.closed_trade_count }} / {{ stats.active_position_count }}</strong></div>
+  </div>
+</details>
+{% endif %}
+
+<section style="margin-top:1.5rem">
+  <div class="report-md" id="report-md">{{ report.report_md or "（报告为空）" }}</div>
+</section>
+
+{% if lessons %}
+<section style="margin-top:1.5rem">
+  <h3>📖 本期沉淀到知识库的规则</h3>
+  <ul class="lessons-list">
+    {% for l in lessons %}<li>{{ l }}</li>{% endfor %}
+  </ul>
+</section>
+{% endif %}
+
+<script>
+// 渲染 markdown
+document.addEventListener("DOMContentLoaded", function() {
+  const el = document.getElementById("report-md");
+  if (el && window.marked && window.DOMPurify) {
+    const raw = el.textContent;
+    el.innerHTML = DOMPurify.sanitize(marked.parse(raw));
+  }
+});
+</script>
+
+<style>
+.stats-panel { padding:0.8rem 1rem; background:#f8f9fa; border-radius:6px; }
+.stats-panel summary { cursor:pointer; }
+.stats-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); gap:0.8rem; margin-top:0.7rem; }
+.stat { text-align:center; padding:0.3rem; }
+.stat small { display:block; color:#888; font-size:0.75rem; }
+.stat strong { font-size:1.15rem; }
+.up { color:#e53935; }
+.down { color:#43a047; }
+.report-md { line-height:1.7; }
+.report-md h1, .report-md h2 { margin-top:1.5rem; }
+.report-md h3 { margin-top:1.2rem; border-bottom:1px solid #eee; padding-bottom:0.3rem; }
+.report-md pre { background:#f5f5f5; padding:0.8rem; border-radius:4px; overflow-x:auto; }
+.report-md code { background:#f5f5f5; padding:0.1rem 0.3rem; border-radius:3px; }
+.lessons-list { list-style:none; padding-left:0; }
+.lessons-list li { padding:0.5rem 0.8rem; background:#fffdf6; border-left:3px solid #ffd54f; border-radius:0 3px 3px 0; margin-bottom:0.4rem; font-size:0.92rem; }
+</style>
+{% endblock %}
