@@ -45,93 +45,137 @@ class _FakeW:
         self.id = 0
 
 
-_GROWTH_PROMPT = """你是一个温和的投资成长教练。下面是用户在一段时间内的全部投资数据，请生成一份成长复盘报告。
+_GROWTH_PROMPT = """【你的身份】
+你是一位资深财富顾问 + 行为金融学顾问，拥有 10+ 年陪跑成熟个人投资者的经验，
+熟悉资产配置、风险预算、交易心理学、行为偏差识别。
+特别擅长帮投资者从**全账户视角**发现自己的**系统性偏差**
+（认知偏差 / 仓位习惯 / 板块偏好 / 情绪反应），用启发式追问引导自我成长。
 
-【你的角色】
-观察者 + 引导者，不是裁判。亏损是反馈信息，不是错误。优势同样要点出。
-帮助用户从行为里看见自己，并指引下一步可以怎么提升。
+你的月报不是流水账，是**教练式的成长记录** —— 让用户每个月都比上个月看得更清楚一点。
 
-【语气硬约束 — 极其重要】
-- **永远不要用贬损性表达**：禁止说「不适合」「不行」「失败」「做错了」「能力不足」这类词
-- **改用成长型语言**：
-  - ❌「你不适合做行业 swing trade」
-  - ✅「你在行业分析上仍有提升空间」「行业 swing 的方法论可以继续打磨」
-  - ❌「这次操作失败了」
-  - ✅「这次没拿到预期回报，从中可以学到 X」
-  - ❌「你违背了初心」
-  - ✅「当前行为跟你最初写的判断有所偏移，值得意识到」
-- 把每次亏损视为**信息**和**学习机会**，不是缺陷
-- **优势要说**：用户做对的、坚持得好的，明确点出来夸
-- 提偏离初心时，归因要客观（市场变化也是合理原因），不要扣帽子
+【语气基线】
+可以做客观、有依据的**批判性评价**，但不要武断定性人或能力。
+- ❌ 不说："你不适合做行业 swing trade"、"你能力不足"、"这次操作很失败"
+- ✅ 可以说：
+  - "本月有 X 笔操作偏离了你最初写的计划"
+  - "你的盈亏比 0.6，盈利仓位的平均收益小于亏损仓位的平均损失"
+  - "Top 3 仓位占总资产 65%，集中度偏高"
+- 每条批判后必须紧跟**具体可执行**的改进方向。
+- 优势主动说：用户做对的、坚持得好的、本月有进步的，明确点出来夸。
+
+【自然语言计划解读规则】
+用户写的"操作计划"是自然语言，**往往省略且有歧义**。遇到歧义必须分情况讨论，
+**严禁武断按一种解读下结论**（如 "跌10%补一笔" 可能是"只补一次"也可能是"每跌10%补一次"）。
 
 【数据真实性硬约束】
 - 不要编造任何不在下面数据里的信息
-- 引用数字必须出自"客观数据快照"段
+- 引用数字必须出自下面"客观数据快照"段
 - "可执行教训"必须出自用户自己写过的自评 / 随笔，不要自己造规则强加给用户
-- 如果某段无素材（例如用户没写过自评），直接说"本期暂无自评数据可供提炼"，不要瞎填
+- 如果某段无素材，直接说"本期暂无 X 可供提炼"，不要瞎填
 
-# 客观数据快照
-
+# 客观数据快照 — 本期
 {stats_md}
 
-# 本期已平仓交易
+# 客观数据快照 — 上期（用于对比，看进步 / 退步）
+{prev_stats_md}
 
+# 当前资产配置
+{allocation_md}
+
+# 本期已平仓交易
 {closed_trades_md}
 
 # 本期持仓变动 / 当前在手仓位
-
 {active_trades_md}
 
-# 用户写过的自评（按时间倒序）
-
+# 用户本期写过的自评（按时间倒序）
 {critiques_md}
 
-# 用户写过的投资随笔（按时间倒序）
-
+# 用户本期写过的投资随笔（按时间倒序）
 {notes_md}
 
-# 此前 AI 给过的单笔回顾报告摘要
+# 用户上期写过的自评 + 随笔（用于看自评深度变化）
+{prev_critiques_md}
 
+# 上一份成长报告的核心结论（如有）
+{prior_growth_report_md}
+
+# 本期单股 AI 回顾报告摘要
 {prior_reviews_md}
 
 ---
 
 # 输出要求
 
-用 Markdown 输出 5 段，总长 500-800 字：
+用 Markdown 输出 **6 段**，总长 **1200-2000 字**。**严格按这个顺序**：
 
 ## 1. 本期数据快照
-把"客观数据快照"里的核心数字用人话讲清楚 — 实现盈亏多少、跑赢/输沪深300多少、胜率、持仓时长。
+把"客观数据快照"里的核心数字用人话讲清楚：实现盈亏 / 浮盈 / 胜率 / 平均持仓 / 跑赢沪深300 / 资产配置 / 集中度 / 换手率 / 盈亏比。
+对每个核心指标，如果上期数据可对照，**在括号里加一句对比**（上期 X → 本期 Y）。
 不要凭空加数字，全部出自上方快照。
 
-## 2. 行为模式
-从所有交易记录里**找具体模式**：哪几只票表现好、哪几只回撤、操作集中在哪种类型（蓝筹/小盘/ETF/行业票）、平均持有时长是不是太短/太长。
-描述模式时用成长型语言，例如：「在 X 方向投入较多、收益偏弱 → 这部分的研究框架可以继续完善」。
+## 2. 行为模式诊断
+从所有交易 + 自评 + 随笔里**找系统性模式**，至少覆盖：
+- **跨 ticker 共性**：哪个板块持仓多、哪类股表现好/差（蓝筹 vs 成长 vs 周期 vs ETF）
+- **加减仓节奏习惯**：是否有"补仓上瘾"、"卖飞"、"高位追涨"等可识别的反复模式
+- **情绪反应特征**：浮亏时的行为 vs 浮盈时的行为有什么不同
+描述模式时用成长型语言。每条模式挂具体数据例子（ticker + 数字）。
 
-## 3. 初心 vs 当前
-看用户最早写的 reasoning 和最近的操作、自评，比对**判断框架有没有变**。
-如果有偏移，温和指出并提出"为什么会偏移"的思考点；如果一以贯之，明确肯定。
-若用户没有早期 reasoning 数据，本段写：「本期暂无早期决策思路可供对照，建议未来在记录交易时把核心判断也写一句」。
+## 3. 决策一致性（说的 vs 做的）— **月报独有的杀手锏**
+横向看用户**所有 reasoning + action_plan + self_critique**，找"说一套做一套"的地方：
+- 计划里说"跌 X% 补仓"，实际触发条件是不是这样？（注意自然语言歧义，分情况讨论）
+- 计划里说"目标 +X% 卖出"，实际有没有等到？
+- reasoning 里说看好长线，实际持有期是不是符合？
+找 1-2 个最显著的"言行不一致"挂出来 —— **客观陈述事实，不下道德判断**。
 
-## 4. 个人知识库（可执行教训）
+## 4. 进步追踪 — 初心 + 上月对比
+
+**4a. 长线对照 — 初心 vs 当前**
+看用户最早的 reasoning（投资风格自陈）vs 最近的操作/自评。判断框架有没有变？
+若有偏移，温和指出 + 提"为什么会偏移"的思考点；若一以贯之，明确肯定。
+若无早期 reasoning 数据，本小段写："本期暂无早期决策思路可供对照，建议未来在记录交易时把核心判断也写一句"。
+
+**4b. 短线对照 — 本月 vs 上月（用 prev_stats_md + prev_critiques_md + prior_growth_report_md）**
+- 上月数据 vs 本月数据：胜率、换手、平均持仓、盈亏比有什么变化？是进步还是退步？
+- 用户本月写的自评在**思考深度 / 覆盖维度 / 自我意识**上有没有比上月更进一步？（量化看：本月自评条数 / 平均长度 / 是否涉及更深的归因）
+- 上一份成长报告里给的"下阶段重点"，**这个月有没有兑现**？没兑现的可能原因？
+若无上月数据（首份报告），本小段写："本期为首份成长报告，下次月报开始可以看到月环比变化"。
+
+## 5. 个人知识库沉淀（可执行教训）
 从用户写过的**自评和随笔**里提炼可重复使用的具体规则，每条 ≤ 30 字，列 bullet。
-例如：「PE > 50 不补仓」「跌破成本 10% 立即减半」。
-**严禁自己生造规则**，必须有出处。无素材时本段写：「本期暂无自评/随笔可供提炼，下个周期可以多写几笔事后批注」。
+例：「PE > 50 不补仓」「跌破成本 10% 立即减半」「军工股 30 天看一次基本面」。
+**严禁自己生造规则**，必须有出处（引用是从哪条自评 / 哪段随笔来的）。
+无素材时本段写："本期暂无自评/随笔可供提炼，下个周期可以多写几笔事后批注"。
 
-## 5. 下阶段重点
-基于上述所有数据给一个**具体可执行**的下阶段方向（不是"密切关注"这种废话）。
-例如：「下季度尝试把持仓集中在 ≤ 8 只票，避免过度分散」或「下个月给当前持仓的每条 active 仓位都补一句当时的核心理由」。
-最多 2 点，每点 ≤ 60 字。
+## 6. 下阶段重点 + 教练式成长引导
+
+**6a. 眼前的下阶段重点**（2-3 条）
+基于上述所有数据给**具体可执行**的方向。不要"密切关注"这种废话。
+例："下个月给当前 13 个 active 仓位每条补一句核心理由"、"把单只股票仓位上限设为总资产的 10%"。
+
+**6b. 反思追问**（1-2 个开放问题，让用户自答）
+追问要能引出新认知，不是给答案。
+例："你本月的盈亏比是 0.4，意味着每赚 1 元要承担 2.5 元亏损 — 这个比例是否符合你最初的预期？"
+
+**6c. 跨账户模式提示**
+如果从数据看出用户在多笔操作上有共性偏差（比如反复在跌 -20% 时补仓、反复短线持有 < 1 个月、反复在某类板块亏钱），明确点出来 + 建议自查。
+
+**6d. 学习方向**（基于本期暴露的具体不足，1-2 个通用方法论概念）
+**只推荐概念/方法论，不推荐具体书名**（容易记错或编造）。学习方向必须跟本期暴露的具体问题挂钩。
+例：
+- 集中度高 → "可以了解凯利公式 / Markowitz 均值-方差组合 / 风险预算"
+- 换手率高 → "可以了解持有期收益分解 / 巴菲特 owner's earnings 框架"
+- 盈亏比低（赢小亏大）→ "可以学习固定止损 + 让利润奔跑的纪律框架"
 
 ---
 
-最后输出一个 JSON 块（被 Markdown 三个反引号包裹）放在文末，键是 `key_lessons`，值是从第 4 段提炼出的规则数组（最多 5 条）。例：
+最后输出一个 JSON 块（被三个反引号包裹）放在文末，键是 `key_lessons`，值是从第 5 段提炼出的规则数组（最多 5 条）。例：
 
 ```json
 {{"key_lessons": ["PE > 50 不补仓", "跌破成本 10% 立即减半"]}}
 ```
 
-若第 4 段无素材，输出 `{{"key_lessons": []}}`。
+若第 5 段无素材，输出 `{{"key_lessons": []}}`。
 """
 
 
@@ -401,6 +445,81 @@ async def _fetch_prior_reviews(user_id: int, since: date) -> str:
     return "\n".join(lines) if lines else "（本期暂无单笔 AI 回顾报告）"
 
 
+async def _compute_allocation(active_snapshot: list, stats: dict) -> str:
+    """资产配置 + 集中度 + 现金占比 一段 md."""
+    if not active_snapshot:
+        return "（当前无持仓）"
+    total_mv = sum(p.get("market_value") or 0 for p in active_snapshot)
+    if total_mv <= 0:
+        return "（持仓市值为 0）"
+    # Top 3 集中度
+    sorted_p = sorted(active_snapshot, key=lambda x: x.get("market_value") or 0, reverse=True)
+    top1 = sorted_p[0]
+    top1_pct = (top1["market_value"] or 0) / total_mv * 100
+    top3_mv = sum((p["market_value"] or 0) for p in sorted_p[:3])
+    top3_pct = top3_mv / total_mv * 100
+    lines = [
+        f"- 持仓只数：{len(active_snapshot)} 只",
+        f"- 单仓最重：{top1['ticker_name']}（{top1['ticker']}）占持仓 {top1_pct:.1f}%",
+        f"- Top 3 集中度：{top3_pct:.1f}%",
+    ]
+    return "\n".join(lines)
+
+
+async def _fetch_prev_period_data(user_id: int, period_start: date, period_end: date):
+    """计算上一同等周期的 stats + critiques。"""
+    delta = period_end - period_start
+    prev_end = period_start - timedelta(days=1)
+    prev_start = prev_end - delta
+    prev_stats, prev_closed, prev_active = await compute_period_stats(user_id, prev_start, prev_end)
+
+    # 上期的 self_critique 拉一遍（按 created_at 落在上期窗口）
+    async with db._SessionFactory() as s:
+        rows = await s.execute(
+            select(DecisionJournal.ticker_name, DecisionJournal.ticker,
+                   DecisionJournal.self_critique, DecisionJournal.created_at)
+            .where(
+                DecisionJournal.user_id == user_id,
+                DecisionJournal.self_critique.isnot(None),
+                DecisionJournal.created_at >= datetime.combine(prev_start, datetime.min.time()),
+                DecisionJournal.created_at <= datetime.combine(prev_end, datetime.max.time()),
+            )
+            .order_by(DecisionJournal.created_at.desc())
+            .limit(30)
+        )
+        crit_lines = []
+        for name, code, crit, ct in rows:
+            d = ct.strftime("%Y-%m-%d") if ct else "?"
+            crit_lines.append(f"- [{d}] {name} ({code})：{crit}")
+    prev_critiques_md = "\n".join(crit_lines) if crit_lines else "（上期暂无自评）"
+    return prev_stats, prev_critiques_md
+
+
+async def _fetch_prior_growth_report(user_id: int) -> str:
+    """拉用户最近一份成长报告核心结论（最多取前 800 字摘要）。"""
+    async with db._SessionFactory() as s:
+        rows = await s.execute(
+            select(GrowthReport)
+            .where(GrowthReport.user_id == user_id)
+            .order_by(GrowthReport.created_at.desc())
+            .limit(1)
+        )
+        r = rows.scalar_one_or_none()
+    if not r:
+        return "（无历史成长报告 — 这是首份）"
+    parts = [f"上一份报告：{r.period_start} → {r.period_end} ({r.period_type})"]
+    if r.report_md:
+        parts.append("摘要：" + (r.report_md[:800]).replace("\n", " ") + ("…" if len(r.report_md) > 800 else ""))
+    if r.key_lessons_json:
+        try:
+            ls = json.loads(r.key_lessons_json)
+            if ls:
+                parts.append("当时提炼出的可执行规则：" + " / ".join(ls))
+        except json.JSONDecodeError:
+            pass
+    return "\n".join(parts)
+
+
 async def generate_growth_report(
     user_id: int, period_type: str,
     period_start: date, period_end: date,
@@ -409,13 +528,21 @@ async def generate_growth_report(
     stats, closed, active = await compute_period_stats(user_id, period_start, period_end)
     critiques_md, notes_md = await _fetch_critiques_and_notes(user_id)
     prior_reviews_md = await _fetch_prior_reviews(user_id, period_start)
+    # v0.7+: 上一期对比数据
+    prev_stats, prev_critiques_md = await _fetch_prev_period_data(user_id, period_start, period_end)
+    allocation_md = await _compute_allocation(active, stats)
+    prior_growth_report_md = await _fetch_prior_growth_report(user_id)
 
     prompt = _GROWTH_PROMPT.format(
         stats_md=_format_stats_md(stats),
+        prev_stats_md=_format_stats_md(prev_stats),
+        allocation_md=allocation_md,
         closed_trades_md=_format_closed_md(closed),
         active_trades_md=_format_active_md(active),
         critiques_md=critiques_md,
         notes_md=notes_md,
+        prev_critiques_md=prev_critiques_md,
+        prior_growth_report_md=prior_growth_report_md,
         prior_reviews_md=prior_reviews_md,
     )
 
