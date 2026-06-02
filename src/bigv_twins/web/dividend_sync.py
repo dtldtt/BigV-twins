@@ -163,9 +163,8 @@ async def sync_user_dividends(user_id: int) -> dict:
                     created_at=ex_dt,
                 )
                 s.add(entry)
-                # 累加到 user.cny_dividend
-                user = await s.get(User, user_id)
-                user.cny_dividend = (user.cny_dividend or 0) + total_div
+                # v0.7: 不再维护 user.cny_dividend — 改由 /journal 路由实时 SUM
+                # （SUM 会过滤掉未来除权日的分红，自然处理 "未到账" 状态）
                 await s.commit()
                 n_new += 1
                 total_amount += total_div

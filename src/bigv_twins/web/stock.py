@@ -120,6 +120,7 @@ async def stock_page(
             mentions.append({
                 "blogger_slug": br.blogger_slug,
                 "blogger_name": blogger.name if blogger else br.blogger_slug,
+                "blogger_url_token": blogger.url_token if blogger else "",  # for zhihu archive link
                 "date": br.brief_date,
                 "brief_excerpt": (br.brief_md or "")[:200],
             })
@@ -172,11 +173,14 @@ async def stock_page(
     _raw_entries = list(journal_rows.scalars())
     # Eagerly extract attributes to avoid lazy-load issues after session closes
     from .journal import _parse_critique
+    today = date.today()
     journal_entries = []
     for j in _raw_entries:
-        # 把 critique 解析成 [(date, content), ...]，最新在前
         critique_entries = _parse_critique(j.self_critique)
-        critique_entries.reverse()  # 新日期在上
+        critique_entries.reverse()
+        # 未来除权日的分红：标记为 future，模板里渲染灰色 + 「未来」标签，
+        # 不计入成本/现金（除权日到了后变成普通颜色）
+        is_future = j.created_at and j.created_at.date() > today
         journal_entries.append({
             "id": j.id,
             "action": j.action,
@@ -187,7 +191,8 @@ async def stock_page(
             "action_detail": j.action_detail,
             "target_price": j.target_price,
             "stop_loss_price": j.stop_loss_price,
-            "critique_entries": critique_entries,  # list of (date_iso_or_"legacy", content)
+            "critique_entries": critique_entries,
+            "is_future": is_future,
         })
 
     # Fetch ROE asynchronously (only A-share stocks, not ETF, not HK)

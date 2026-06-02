@@ -59,6 +59,9 @@
       <div class="mention-head">
         <a href="/about/{{ m.blogger_slug }}"><strong>{{ m.blogger_name }}</strong></a>
         <small class="muted">{{ m.date }}</small>
+        {% if m.blogger_url_token %}
+        <a href="http://8.155.174.112:8000/author/{{ m.blogger_url_token }}" target="_blank" class="mention-zh-link">📚 zhihu 归档 →</a>
+        {% endif %}
       </div>
       <p class="mention-excerpt">{{ m.brief_excerpt }}{% if m.brief_excerpt|length >= 200 %}…{% endif %}</p>
     </div>
@@ -85,58 +88,20 @@
 </section>
 {% endif %}
 
-<!-- AI 回顾报告（per-ticker 综合，v0.7） -->
-{% if journal_entries %}
-<section class="stock-section">
-  <div style="display:flex; align-items:center; justify-content:space-between">
-    <h3 style="margin:0">📋 AI 回顾报告</h3>
-    <form method="post" action="/stock/{{ ticker }}/review/now" style="margin:0">
-      <button type="submit" class="secondary outline" style="padding:0.3rem 0.8rem; font-size:0.8rem; margin:0; width:auto">
-        🔁 生成新回顾（约 30s）
-      </button>
-    </form>
-  </div>
-  {% if ticker_reviews %}
-  <p class="muted" style="font-size:0.8rem; margin-top:-0.3rem">
-    Qoder performance 综合该股全部操作 + 自评 + 客观快照生成。最新在最上。
-  </p>
-  {% for r in ticker_reviews %}
-  <details class="ticker-review" {% if loop.first %}open{% endif %}>
-    <summary>
-      <span class="rev-type">
-        {% if r.review_type == '1week' %}1 周回顾
-        {% elif r.review_type == '1month' %}1 月回顾
-        {% elif r.review_type == '3month' %}3 月回顾
-        {% elif r.review_type == '6month' %}半年回顾
-        {% else %}手动回顾{% endif %}
-      </span>
-      <small class="muted">{{ r.created_at.strftime("%Y-%m-%d %H:%M") if r.created_at else "" }}</small>
-      {% if r.current_price %}<small class="muted">现价 ¥{{ "%.2f"|format(r.current_price) }}</small>{% endif %}
-    </summary>
-    <div class="rev-body md-rendered" data-raw="{{ r.review_report_md or '' }}">{{ r.review_report_md or '' }}</div>
-  </details>
-  {% endfor %}
-  {% else %}
-  <p class="muted" style="font-size:0.85rem; padding:1rem; background:#fafafa; border-radius:6px">
-    还没有 AI 回顾。点上面「🔁 生成新回顾」立即触发，或等每日 20:00 cron 自动生成（按 7→30→90→180 天阶梯）。
-  </p>
-  {% endif %}
-</section>
-{% endif %}
-
 <!-- Decision Journal -->
 <section class="stock-section">
   <h3>📝 我的操作记录 ({{ journal_entries|length }}条)</h3>
   {% if journal_entries %}
   {% set redirect_url = "/stock/" ~ ticker %}
   {% for j in journal_entries %}
-  <div class="op-record">
+  <div class="op-record {% if j.is_future %}op-record-future{% endif %} {% if j.action == 'dividend' %}op-record-dividend{% endif %}">
     <div class="op-head">
       <span class="journal-action journal-action-{{ j.action }}">
-        {% if j.action == "open" %}建仓{% elif j.action == "add" %}加仓{% elif j.action == "reduce" %}减仓{% elif j.action == "close" %}清仓{% elif j.action == "retroactive" %}补录{% endif %}
+        {% if j.action == "open" %}建仓{% elif j.action == "add" %}加仓{% elif j.action == "reduce" %}减仓{% elif j.action == "close" %}清仓{% elif j.action == "retroactive" %}补录{% elif j.action == "dividend" %}💸 派息{% endif %}
       </span>
       <span>¥{{ "%.2f"|format(j.price_at_decision) if j.price_at_decision else "—" }}{% if j.shares %} · {{ j.shares }}股{% endif %}</span>
       <small class="muted">{{ j.created_at.strftime("%Y-%m-%d") if j.created_at else "" }}</small>
+      {% if j.is_future %}<span class="future-badge">🔮 未来（除权日未到）</span>{% endif %}
       {% if j.target_price or j.stop_loss_price %}
       <small class="muted">
         {% if j.target_price %}🎯 ¥{{ "%.2f"|format(j.target_price) }}{% endif %}
@@ -183,6 +148,45 @@
   <p class="muted">暂无操作记录。</p>
   {% endif %}
 </section>
+
+<!-- AI 回顾报告（per-ticker 综合，v0.7） — 放在操作记录之后 -->
+{% if journal_entries %}
+<section class="stock-section">
+  <div style="display:flex; align-items:center; justify-content:space-between">
+    <h3 style="margin:0">📋 AI 回顾报告 <small class="muted" style="font-weight:normal; font-size:0.7em">（每周六 20:00 自动生成）</small></h3>
+    <form method="post" action="/stock/{{ ticker }}/review/now" style="margin:0">
+      <button type="submit" class="secondary outline" style="padding:0.3rem 0.8rem; font-size:0.8rem; margin:0; width:auto">
+        🔁 立即生成（约 30s）
+      </button>
+    </form>
+  </div>
+  {% if ticker_reviews %}
+  <p class="muted" style="font-size:0.8rem; margin-top:-0.3rem">
+    Qoder performance 综合该股全部操作 + 自评 + 客观快照生成。最新在最上。
+  </p>
+  {% for r in ticker_reviews %}
+  <details class="ticker-review" {% if loop.first %}open{% endif %}>
+    <summary>
+      <span class="rev-type">
+        {% if r.review_type == '1week' %}1 周回顾
+        {% elif r.review_type == '1month' %}1 月回顾
+        {% elif r.review_type == '3month' %}3 月回顾
+        {% elif r.review_type == '6month' %}半年回顾
+        {% else %}手动回顾{% endif %}
+      </span>
+      <small class="muted">{{ r.created_at.strftime("%Y-%m-%d %H:%M") if r.created_at else "" }}</small>
+      {% if r.current_price %}<small class="muted">现价 ¥{{ "%.2f"|format(r.current_price) }}</small>{% endif %}
+    </summary>
+    <div class="rev-body md-rendered" data-raw="{{ r.review_report_md or '' }}">{{ r.review_report_md or '' }}</div>
+  </details>
+  {% endfor %}
+  {% else %}
+  <p class="muted" style="font-size:0.85rem; padding:1rem; background:#fafafa; border-radius:6px">
+    还没有 AI 回顾。点上面「🔁 立即生成」立即触发，或等每周六 20:00 cron 自动生成。
+  </p>
+  {% endif %}
+</section>
+{% endif %}
 
 <!-- Backtest records (按博主情绪分组：推荐 / 看空 / 中性) -->
 {% if backtests %}
@@ -282,6 +286,12 @@ td.down { color:#43a047; }
 
 /* operation record (stock page) */
 .op-record { padding:0.7rem 0.9rem; border:1px solid #e8e8e8; border-radius:6px; margin-bottom:0.7rem; }
+.op-record-dividend { background:#fff8e1; border-color:#f5e6a3; }
+.op-record-future { background:#f0f0f5; border:1px dashed #ccc; opacity:0.75; }
+.op-record-future .op-head .journal-action { opacity:0.7; }
+.future-badge { font-size:0.72rem; padding:0.1rem 0.5rem; background:#e1bee7; color:#6a1b9a; border-radius:10px; font-weight:600; }
+.mention-zh-link { font-size:0.78rem; margin-left:auto; color:#1565c0; text-decoration:none; padding:0.1rem 0.4rem; border-radius:3px; background:#f0f7ff; }
+.mention-zh-link:hover { background:#e3f2fd; }
 .op-head { display:flex; align-items:center; gap:0.6rem; padding-bottom:0.5rem; border-bottom:1px solid #f0f0f0; margin-bottom:0.4rem; font-size:0.85rem; }
 .op-head-actions { margin-left:auto; display:flex; gap:0.8rem; font-size:0.8rem; }
 .op-edit-link { color:#1565c0; text-decoration:none; padding:0.1rem 0.4rem; border-radius:3px; }

@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 
@@ -248,8 +248,11 @@ def _build_portfolio(journals: list, price_map: dict, quote_map: dict,
                 total_buy_amount = 0
             elif j.action == "dividend":
                 # 现金分红：股数不变，cost 减总分红金额（实现盈利）
-                # price_at_decision = 每股派息（元）；shares = 当时持仓股数
-                # 总分红 = price × shares
+                # 未来除权日的分红跳过（钱还没到），到日期了自然生效
+                from datetime import date as _date
+                ex_date = j.created_at.date() if j.created_at else _date.today()
+                if ex_date > _date.today():
+                    continue
                 if total_shares > 0 and shares > 0 and price > 0:
                     div_total = shares * price
                     total_cost -= div_total
@@ -334,13 +337,29 @@ async def journal_list(
     portfolio_by_ticker = {p["ticker"]: p for p in portfolio}
 
     # === 按币种分两路统计 ===
-    # 资金（principal/dividend）从 user 字段拿；市值/浮盈从 portfolio 按币种聚合
+    # 分红改用实时 sum，按币种 + 仅含已到除权日的（未来分红不计入）
+    today_dt = datetime.combine(date.today(), datetime.max.time())
+    from bigv_twins.stock_data import resolve_ticker as _rt
+    cny_div_sum = 0.0
+    hkd_div_sum = 0.0
+    for j in all_journals:
+        if j.action != "dividend":
+            continue
+        if j.created_at and j.created_at > today_dt:
+            continue  # 未来分红，未到账
+        amt = (j.price_at_decision or 0) * (j.shares or 0)
+        info = _rt(j.ticker)
+        if info and info.currency == "HKD":
+            hkd_div_sum += amt
+        else:
+            cny_div_sum += amt
+
     accounts: dict[str, dict] = {
         "CNY": {
             "label": "A 股账户",
             "symbol": "¥",
             "principal": user.cny_principal or 0,
-            "dividend": user.cny_dividend or 0,
+            "dividend": cny_div_sum,
             "market_value": 0.0,
             "unrealized_pnl": 0.0,
             "principal_field": "cny_principal",
@@ -350,7 +369,7 @@ async def journal_list(
             "label": "港股账户",
             "symbol": "HK$",
             "principal": user.hkd_principal or 0,
-            "dividend": user.hkd_dividend or 0,
+            "dividend": hkd_div_sum,
             "market_value": 0.0,
             "unrealized_pnl": 0.0,
             "principal_field": "hkd_principal",
