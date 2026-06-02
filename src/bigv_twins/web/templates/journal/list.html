@@ -154,9 +154,16 @@
           <summary>
             📋 <strong>最近一次 AI 回顾</strong>
             <small class="muted">{{ c.latest_review.created_at.strftime("%Y-%m-%d") if c.latest_review.created_at else "" }}</small>
-            <a href="/stock/{{ c.ticker }}#review" onclick="event.stopPropagation()" class="tc-review-link">查看全部 →</a>
+            <a href="/stock/{{ c.ticker }}#review" onclick="event.stopPropagation()" class="tc-review-link">📊 在个股页查看历史</a>
           </summary>
-          <div class="tc-review-md md-rendered" data-raw="{{ c.latest_review.review_report_md or '' }}">{{ c.latest_review.review_report_md or '' }}</div>
+          <div class="tc-review-wrapper">
+            <div class="tc-review-md md-rendered" data-raw="{{ c.latest_review.review_report_md or '' }}">{{ c.latest_review.review_report_md or '' }}</div>
+            <button type="button" class="tc-review-expand" onclick="
+              const md = this.previousElementSibling;
+              const open = md.classList.toggle('tc-review-expanded');
+              this.innerHTML = open ? '⬆ 收起回顾全文' : '⬇ 展开回顾全文（约 1000 字）';
+            ">⬇ 展开回顾全文（约 1000 字）</button>
+          </div>
         </details>
         {% endif %}
       </div>
@@ -452,9 +459,15 @@ function toggleNoteEdit(btnOrItem, nid, cancel) {
 .tc-review-block > summary::-webkit-details-marker { display:none; }
 .tc-review-link { font-size:0.78rem; color:#1565c0; text-decoration:none; margin-left:auto; }
 .tc-review-link:hover { text-decoration:underline; }
-.tc-review-md { padding:0.5rem 0; font-size:0.85rem; line-height:1.6; }
+.tc-review-wrapper { position:relative; }
+.tc-review-md { padding:0.5rem 0; font-size:0.85rem; line-height:1.6; max-height:9em; overflow:hidden; position:relative; }
+.tc-review-md::after { content:''; position:absolute; bottom:0; left:0; right:0; height:3em; background:linear-gradient(to bottom, transparent, #f8f9fa 85%); pointer-events:none; }
+.tc-review-md.tc-review-expanded { max-height:none; }
+.tc-review-md.tc-review-expanded::after { display:none; }
 .tc-review-md h2, .tc-review-md h3 { font-size:0.9rem; margin:0.5rem 0 0.2rem; }
 .tc-review-md p { margin:0.3rem 0; }
 .tc-review-md ul { padding-left:1.3rem; margin:0.3rem 0; }
+.tc-review-expand { display:block; width:100%; padding:0.5rem; margin-top:0.5rem; background:#1565c0; color:white; border:none; border-radius:4px; font-size:0.85rem; cursor:pointer; font-weight:600; }
+.tc-review-expand:hover { background:#0d47a1; }
 </style>
 {% endblock %}
