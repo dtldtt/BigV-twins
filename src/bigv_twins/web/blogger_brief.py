@@ -81,53 +81,96 @@ def fetch_blogger_posts_for_day(author_id: int, day_str: str) -> list[dict]:
 
 
 _SUMMARIZER_SYS = (
-    "你是「赛博大V 投资日报」的总结助手。给你一位投资博主在某一天发的所有"
-    "新帖子（答案 / 文章 / 想法的原文），你的任务是**准确还原博主的真实表达**，"
-    "让用户不用读原文也能精准 grasp 博主今天的判断、情绪、动作。\n\n"
+    "【你的身份】\n"
+    "你是一位拥有 15+ 年中国 A 股 / 港股市场实战经验的资深投资者 + 金融领域权威研究员，"
+    "对宏观周期、行业框架、估值体系、投资者心理有深刻理解。你同时是一名训练有素的"
+    "**语言提炼专家**，擅长从大量原文中精准识别出**真正影响投资决策的关键信号**"
+    "（具体观点、数字依据、操作动作、转折判断），并把它们用最高密度、零损耗的语言"
+    "还原给读者。\n\n"
+    "你的任务不是「复述博主说了什么」，而是**让一个忙碌的投资者用 30 秒就能拿到"
+    "他读 5000 字原文才能拿到的核心信号**。\n\n"
+
     "## 输出 JSON 格式（严格）\n\n"
     "{\n"
-    '  "main_view": "主要观点 80-180 字。多个主题用「；」串接并按重要性排序。",\n'
-    '  "suggestion": "后续建议 ≤ 40 字。'
-    "若博主没明确表态写「未明确表态」。\",\n"
+    '  "main_view": "主要观点 150-300 字。要求见下面【main_view 写作要求】。",\n'
+    '  "key_quotes": ["原文金句1（≤30字）", "原文金句2"],   // 0-3 条，最能代表当日判断的博主原话\n'
+    '  "key_events_mentioned": ["美联储议息", "茅台股东大会"],  // 0-5 条，博主明确提到的事件/数据/时间节点\n'
+    '  "actions_self_disclosed": [   // 博主自己透露的实际操作\n'
+    '    {"ticker": "600519", "ticker_name": "贵州茅台", "action": "reduce", '
+    '"size": "1/3", "rationale": "估值偏高"}\n'
+    "  ],\n"
+    '  "suggestion": "博主对读者的后续建议 ≤ 60 字。若博主没明确表态写「未明确表态」。",\n'
+    '  "vs_yesterday": "对比昨日 brief 有什么新论据/新转向/新提及？没明显变化写「延续昨日观点」。50字内。",\n'
     '  "ticker_opinions": [\n'
-    '    {"ticker": "600519", "ticker_name": "贵州茅台", "sentiment": "bullish", '
-    '"summary": "30字内一句话原文摘要"}\n'
+    '    {\n'
+    '      "ticker": "600519",\n'
+    '      "ticker_name": "贵州茅台",\n'
+    '      "sentiment": "bullish",\n'
+    '      "confidence": "medium",   // low/medium/high — 基于博主原文语气的笃定程度\n'
+    '      "horizon": "long",        // short(<3月)/medium(3月-1年)/long(>1年)/unspecified\n'
+    '      "is_pivot": false,        // 当日明显出现态度转折（如「之前看好，现在重新评估」）时 true\n'
+    '      "summary": "30字内贴原文一句话摘要，能引用就用「」包裹"\n'
+    '    }\n'
     "  ]\n"
     "}\n\n"
-    "## ticker_opinions 字段说明\n\n"
-    "- 列出博主当日提到的**每只**股票。\n"
+
+    "## main_view 写作要求\n"
+    "- 150-300 字，第三人称（「他认为」「他强调」），**严禁伪装博主第一人称**\n"
+    "- **必须保留**：博主提到的**关键数字 / 事件名 / 时间节点**（PE 50倍、上证 3700、美联储议息等）\n"
+    "- **必须包含至少 1 个原文引用**（用「」包裹），选最能代表当日判断的句子\n"
+    "- 多个主题用「；」串接，按博主自己强调的程度排序，**重要话题不要因为篇幅压缩被丢掉**\n\n"
+
+    "## ticker_opinions / sentiment 详解\n"
+    "- 列出博主当日提到的**每只**股票（含 ETF、指数）\n"
     "- sentiment 4 选 1：\n"
-    "  - bullish（看多）— 明确推荐 / 买入 / 加仓 / 看好后市\n"
-    "  - bearish（看空）— 明确不看好 / 觉得高估 / 预期下跌\n"
-    "  - avoid（回避）— 明确建议不要碰 / 远离 / 风险大\n"
-    "  - neutral（中性）— 仅提及讨论、跟踪、未明确态度\n"
-    "- summary 必须**贴着原文**写，30 字以内，能引用就直接引用博主原话\n"
+    "  - bullish — 明确推荐 / 买入 / 加仓 / 看好后市\n"
+    "  - bearish — 明确不看好 / 觉得高估 / 预期下跌\n"
+    "  - avoid — 明确建议不要碰 / 远离 / 风险大\n"
+    "  - neutral — 仅提及讨论、跟踪、未明确态度、博主表态含糊（如「可能」「或许」）\n"
+    "- confidence：基于原文语气，「我觉得 / 可能 / 也许」= low；明确表态 = medium；「all-in」「重仓」= high\n"
+    "- horizon：根据博主明确提到的时间维度判断；说不清就 unspecified\n"
+    "- is_pivot：仅在博主**明确**说出转向（「之前我看好 X，今天看到 Y 重新评估」）时 true，否则 false\n"
     "- ticker 只收 6 位 A 股代码或 5 位港股代码；只有名字找不到代码的省略\n\n"
-    "## 写作硬约束\n\n"
+
+    "## 硬约束（极其重要）\n"
     "1. 只输出 JSON，不要 markdown 代码块包裹\n"
-    "2. main_view 用第三人称（「他认为」「他强调」），不要伪装博主第一人称\n"
-    "3. **忠于原文** — 严禁外推、脑补、加戏；博主只说「看好 A」，不要写成「对 A 长期看好」\n"
-    "4. 多个帖子讲不同主题时，main_view 用「；」分主题，按博主自己强调的程度排\n"
-    "   重要的话题不要因为篇幅压缩被丢掉\n"
-    "5. 博主对某票的态度有变化时（早上看多下午改口），sentiment 取**当日最后表态**，"
-    "   summary 里要点出「由X转Y」\n"
-    "6. 如果博主提了某票但只是顺带（如「想起去年买 X」），sentiment 用 neutral\n"
-    "7. 不要把别人的观点（博主转述、引用别人的话）当成博主自己的观点\n"
+    "2. **忠于原文** — 严禁外推、脑补、加戏。博主只说「看好 A」，不要写成「对 A 长期看好」\n"
+    "3. **歧义不武断** — 博主表达有歧义时（『可能』『也许』），sentiment 取最接近的标签（一般是 neutral 或 low confidence 的 bullish/bearish），summary 里保留原文不确定表达，**不要替博主下结论**\n"
+    "4. **态度变化** — 博主对某票当日态度有变化时，sentiment 取**当日最后表态**，summary 里点出「由 X 转 Y」，is_pivot 置 true\n"
+    "5. **只收博主自己的观点** — 不要把博主转述、引用别人的观点当成博主自己的（特别注意「有人说…」「网上说…」「群友提到…」这类标志）\n"
+    "6. **顺带提及不算表态** — 博主只是顺带提到某票（「想起去年买的 X」「之前持有过 Y」），sentiment 用 neutral，confidence 用 low\n"
+    "7. **actions_self_disclosed 只填博主明确说自己今天做了的操作**，不要把「建议读者去做」当成博主自己的动作\n"
 )
 
 
 _VALID_SENTIMENTS = {"bullish", "bearish", "avoid", "neutral"}
 
 
+async def _fetch_yesterday_brief(blogger_slug: str, today_date_str: str) -> str:
+    """拉该博主昨天的 brief（如有），用于 prompt 里"vs_yesterday" 对比。"""
+    from datetime import datetime as _dt, timedelta as _td
+    try:
+        today_dt = _dt.strptime(today_date_str, "%Y-%m-%d").date()
+    except ValueError:
+        return ""
+    yesterday_str = (today_dt - _td(days=1)).strftime("%Y-%m-%d")
+    async with db._SessionFactory() as s:
+        row = await s.execute(
+            select(BloggerDailyBrief)
+            .where(BloggerDailyBrief.blogger_slug == blogger_slug)
+            .where(BloggerDailyBrief.brief_date == yesterday_str)
+            .limit(1)
+        )
+        br = row.scalar_one_or_none()
+    return br.brief_md if br and br.brief_md else ""
+
+
 async def summarize_blogger(blogger_slug: str, blogger_name: str,
                             posts: list[dict]) -> dict:
-    """LLM single call → {"main_view", "suggestion", "mentioned_tickers", "ticker_opinions"}.
+    """LLM single call → 7-field JSON (main_view, key_quotes, key_events,
+    actions_self_disclosed, suggestion, vs_yesterday, ticker_opinions)。
 
-    走 Qoder SDK performance（推理重，且需要严格忠于原文，flash 会丢信息 / 加戏）。
-    ticker_opinions 是新加的：每只票直接带 sentiment + summary，省一次 LLM
-    （之前 opinion_extractor 是单独一次调用解析这步的输出反推情绪）。
-
-    Empty posts → returns a placeholder dict rather than calling LLM.
+    走 Qoder SDK performance（推理重，且需要严格忠于原文）。
     """
     if not posts:
         return {
@@ -135,11 +178,19 @@ async def summarize_blogger(blogger_slug: str, blogger_name: str,
             "suggestion": "—",
             "mentioned_tickers": [],
             "ticker_opinions": [],
+            "key_quotes": [], "key_events_mentioned": [],
+            "actions_self_disclosed": [], "vs_yesterday": "—",
         }
 
+    today_date_str = posts[0]["created_time"][:10]
+    yesterday_md = await _fetch_yesterday_brief(blogger_slug, today_date_str)
+
     user_input_parts = [f"博主：{blogger_name} (slug={blogger_slug})\n",
-                        f"日期：{posts[0]['created_time'][:10]}\n",
-                        f"当日新帖共 {len(posts)} 篇\n\n---\n"]
+                        f"日期：{today_date_str}\n",
+                        f"当日新帖共 {len(posts)} 篇\n"]
+    if yesterday_md:
+        user_input_parts.append(f"\n=== 昨日 brief（仅供「今天有什么新/转向」对比，不要复述） ===\n{yesterday_md}\n=== 昨日 brief 结束 ===\n")
+    user_input_parts.append("\n---\n")
     for i, p in enumerate(posts, 1):
         head = f"\n### 帖子 {i} ({p['content_type']}, voteup={p['voteup_count']})"
         if p["title"]:
@@ -151,10 +202,10 @@ async def summarize_blogger(blogger_slug: str, blogger_name: str,
     raw = await _call_qoder_brief(prompt, blogger_slug)
     if raw is None:
         return {
-            "main_view": "（LLM 总结失败）",
-            "suggestion": "—",
-            "mentioned_tickers": [],
-            "ticker_opinions": [],
+            "main_view": "（LLM 总结失败）", "suggestion": "—",
+            "mentioned_tickers": [], "ticker_opinions": [],
+            "key_quotes": [], "key_events_mentioned": [],
+            "actions_self_disclosed": [], "vs_yesterday": "—",
         }
 
     full = raw.strip()
@@ -166,10 +217,10 @@ async def summarize_blogger(blogger_slug: str, blogger_name: str,
     except json.JSONDecodeError:
         log.warning("blogger_brief JSON parse failed for %s: %r", blogger_slug, full[:400])
         return {
-            "main_view": full[:500] or "（解析失败）",
-            "suggestion": "—",
-            "mentioned_tickers": [],
-            "ticker_opinions": [],
+            "main_view": full[:600] or "（解析失败）", "suggestion": "—",
+            "mentioned_tickers": [], "ticker_opinions": [],
+            "key_quotes": [], "key_events_mentioned": [],
+            "actions_self_disclosed": [], "vs_yesterday": "—",
         }
 
     # 校验 + 归一 ticker_opinions
@@ -185,21 +236,54 @@ async def summarize_blogger(blogger_slug: str, blogger_name: str,
             sent = op.get("sentiment", "neutral")
             if sent not in _VALID_SENTIMENTS:
                 sent = "neutral"
+            conf = op.get("confidence", "medium")
+            if conf not in ("low", "medium", "high"):
+                conf = "medium"
+            hor = op.get("horizon", "unspecified")
+            if hor not in ("short", "medium", "long", "unspecified"):
+                hor = "unspecified"
             ticker_opinions.append({
                 "ticker": tcode,
                 "ticker_name": str(op.get("ticker_name") or tcode)[:60],
                 "sentiment": sent,
-                "summary": str(op.get("summary") or "")[:80],
+                "confidence": conf,
+                "horizon": hor,
+                "is_pivot": bool(op.get("is_pivot", False)),
+                "summary": str(op.get("summary") or "")[:100],
             })
-
-    # mentioned_tickers 从 ticker_opinions 派生，向后兼容老消费者（backtest 等）
     mentioned = [op["ticker"] for op in ticker_opinions]
 
+    # 校验新加的列表字段
+    def _str_list(key: str, max_len: int = 5, item_cap: int = 60) -> list[str]:
+        v = obj.get(key) or []
+        if not isinstance(v, list):
+            return []
+        return [str(x)[:item_cap] for x in v if x][:max_len]
+
+    raw_actions = obj.get("actions_self_disclosed") or []
+    actions: list[dict] = []
+    if isinstance(raw_actions, list):
+        for a in raw_actions:
+            if not isinstance(a, dict):
+                continue
+            actions.append({
+                "ticker": str(a.get("ticker") or "")[:16],
+                "ticker_name": str(a.get("ticker_name") or "")[:60],
+                "action": str(a.get("action") or "")[:20],
+                "size": str(a.get("size") or "")[:40],
+                "rationale": str(a.get("rationale") or "")[:200],
+            })
+
     return {
-        "main_view": (obj.get("main_view") or "")[:800],
-        "suggestion": (obj.get("suggestion") or "")[:80],
+        "main_view": (obj.get("main_view") or "")[:1200],
+        "suggestion": (obj.get("suggestion") or "")[:120],
         "mentioned_tickers": mentioned,
         "ticker_opinions": ticker_opinions,
+        # 新加的 4 个字段
+        "key_quotes": _str_list("key_quotes", max_len=3, item_cap=80),
+        "key_events_mentioned": _str_list("key_events_mentioned", max_len=5, item_cap=80),
+        "actions_self_disclosed": actions[:10],
+        "vs_yesterday": (obj.get("vs_yesterday") or "")[:200],
     }
 
 
@@ -277,10 +361,25 @@ async def generate_briefs_for_day(day_str: str | None = None) -> dict[str, int]:
             errors += 1
             continue
 
-        brief_md = (
-            f"**主要观点**：{result['main_view']}\n\n"
-            f"**后续建议**：{result['suggestion']}"
-        )
+        # 富 brief_md：把新加的几个字段也展示出来，下游 /report 等页面直接渲染就有
+        parts = [f"**主要观点**：{result['main_view']}"]
+        if result.get("key_quotes"):
+            quotes = " / ".join(f"「{q}」" for q in result["key_quotes"])
+            parts.append(f"**金句**：{quotes}")
+        if result.get("key_events_mentioned"):
+            parts.append(f"**关键事件 / 数字**：{' · '.join(result['key_events_mentioned'])}")
+        if result.get("actions_self_disclosed"):
+            act_lines = []
+            for a in result["actions_self_disclosed"]:
+                seg = f"{a.get('action', '')} {a.get('ticker_name', '')}({a.get('ticker', '')})"
+                if a.get("size"): seg += f" {a['size']}"
+                if a.get("rationale"): seg += f" — {a['rationale']}"
+                act_lines.append(seg.strip())
+            parts.append("**博主自报操作**：" + " / ".join(act_lines))
+        parts.append(f"**后续建议**：{result['suggestion']}")
+        if result.get("vs_yesterday") and result["vs_yesterday"] not in ("—", ""):
+            parts.append(f"**vs 昨日**：{result['vs_yesterday']}")
+        brief_md = "\n\n".join(parts)
         async with db._SessionFactory() as s:
             row = BloggerDailyBrief(
                 blogger_slug=b.slug,

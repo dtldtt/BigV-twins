@@ -76,6 +76,7 @@ def _load_bloggers() -> tuple[Blogger, ...]:
         Blogger(slug="eyu",     author_id=2, url_token="chen-ze-xin-49-22", name="寒武纪的鳄鱼"),
         Blogger(slug="sanren",  author_id=3, url_token="10-64-17-85-40",    name="水又三人禾"),
         Blogger(slug="shen",    author_id=4, url_token="shen-chen-7-10",    name="阳光下的沈同学"),
+        Blogger(slug="paipi",   author_id=5, url_token="xiao-peng-61-47",   name="派大星皮皮"),
     )
 
 
