@@ -540,6 +540,7 @@ async def journal_list(
             "status_filter": status_filter,
             "accounts": accounts,  # CNY / HKD 各自 principal/dividend/mv/pnl/total_assets
             "total_realized_pnl": total_realized_pnl,
+            "today_date": date.today(),
             "current_notes": current_notes,
             "notes_month_sections": notes_month_sections,
             "notes_year_sections": notes_year_sections,

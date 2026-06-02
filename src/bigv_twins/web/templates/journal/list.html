@@ -133,13 +133,15 @@
       <div class="tc-body">
         <div class="tc-trades">
           {% for j in c.entries|reverse %}
-          <div class="tc-trade">
+          {% set is_future = j.created_at and j.created_at.date() > today_date %}
+          <div class="tc-trade {% if is_future %}tc-trade-future{% endif %}">
             <a href="/journal/{{ j.id }}" class="tc-trade-line">
               <span class="trade-date">{{ j.created_at.strftime("%Y-%m-%d") if j.created_at else "" }}</span>
               <span class="journal-action journal-action-{{ j.action }}">
                 {% if j.action == 'open' %}建仓{% elif j.action == 'add' %}加仓{% elif j.action == 'reduce' %}减仓{% elif j.action == 'close' %}清仓{% elif j.action == 'retroactive' %}补录{% elif j.action == 'dividend' %}💸 派息{% else %}{{ j.action }}{% endif %}
               </span>
               <span class="trade-price">{{ c.currency_symbol }}{{ "%.2f"|format(j.price_at_decision) if j.price_at_decision else "—" }}{% if j.shares %} × {{ j.shares }}股{% endif %}</span>
+              {% if is_future %}<span class="future-badge">🔮 未来</span>{% endif %}
             </a>
             {% if j.reasoning %}<div class="trade-extra">💡 {{ j.reasoning }}</div>{% endif %}
             {% if j.action_detail %}<div class="trade-extra">📋 {{ j.action_detail }}</div>{% endif %}
@@ -431,6 +433,9 @@ function toggleNoteEdit(btnOrItem, nid, cancel) {
 
 .tc-trades { display:flex; flex-direction:column; gap:0.4rem; }
 .tc-trade { font-size:0.83rem; }
+.tc-trade-future { background:#f0f0f5; border:1px dashed #ccc; border-radius:4px; padding:0.2rem 0.5rem; opacity:0.75; }
+.tc-trade-future .trade-date, .tc-trade-future .trade-price { color:#666; }
+.future-badge { font-size:0.68rem; padding:0.05rem 0.4rem; background:#e1bee7; color:#6a1b9a; border-radius:10px; font-weight:600; margin-left:0.3rem; }
 .tc-trade-line { display:grid; grid-template-columns:5.5rem 3.5rem auto 1fr; gap:0.7rem; align-items:center; padding:0.25rem 0; color:inherit; text-decoration:none; }
 .tc-trade-line:hover .trade-date { text-decoration:underline; }
 .trade-date { color:#888; font-family:'SF Mono','Consolas',monospace; font-size:0.78rem; }
