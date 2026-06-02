@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import select, update, func
 
@@ -22,6 +22,29 @@ from .daily_brief import get_watchlist_quotes
 log = logging.getLogger("bigv_twins.web.review_engine")
 
 # 中文动作标签 — 给模型的 prompt 用，比 'open'/'add' 这种英文 enum 更准确
+# A 股常见行业 → 行业 ETF Tencent symbol（用于算"同期同行业涨跌"）
+# 不在表里的行业自动跳过，不影响主流程
+_INDUSTRY_TO_ETF = {
+    "有色金属": "sh512400", "黄金": "sh518880",
+    "证券": "sh512000", "保险": "sh512070", "银行": "sh512800",
+    "白酒": "sh512690", "食品饮料": "sh512690",
+    "医药": "sh512010", "医药生物": "sh512010", "中药": "sh159647",
+    "汽车": "sh515030", "新能源车": "sh515030", "汽车整车": "sh515030",
+    "汽车零部件": "sh515030",
+    "军工": "sh512710", "国防军工": "sh512710",
+    "煤炭": "sh515220", "采掘": "sh515220",
+    "电力": "sz159611", "公用事业": "sz159611",
+    "通信": "sh515880", "电子": "sh515260", "半导体": "sh512760",
+    "传媒": "sh512980", "钢铁": "sh515210",
+    "化工": "sz159870", "石油石化": "sh159930",
+    "建材": "sz159929", "建筑装饰": "sh516950", "建筑材料": "sz159929",
+    "机械设备": "sh516960",
+    "家用电器": "sz159996",
+    "食品": "sz159928",
+    "纺织服装": "", "轻工制造": "",  # 没合适 ETF
+}
+
+
 _ACTION_ZH = {
     "open": "建仓（首次买入）",
     "add": "加仓",
@@ -278,20 +301,24 @@ _REVIEW_INTERVALS = [7, 30, 90, 180]
 _TICKER_REVIEW_PROMPT = """你是一个投资回顾助手。下面是用户某只股票的全部操作历史，请生成事后回顾。
 
 【你的角色】
-观察者 + 引导者，不是裁判。亏损是反馈信息，不是错误。优势同样要点出。
-助用户看到自己整段持仓周期的轨迹。
+观察者 + 引导者。帮用户看到自己整段持仓周期的轨迹，做客观的复盘评价并给具体可执行的下一步。
 
-【语气硬约束】
-- **禁止贬损**：不说「不适合」「失败」「做错」「能力不足」
-- **改用成长型语言**：「在 X 上有提升空间」「框架可以继续打磨」
-- **优势要说**：用户做对的、坚持得好的，明确点出来夸
+【语气基线】
+可以做客观、有依据的**批判性评价**，但不要武断定性人或能力。
+- ❌ 不说："你不适合投资大宗商品"、"你不适合做投资"、"这次操作很失败"、"能力不足"
+- ✅ 可以说：
+  - "这次没按你最初的计划执行（计划补一笔，实际补了三笔）"
+  - "没关注到 X 这条利空"
+  - "持仓节奏比原计划激进，触发了过度集中"
+- 每条批判后必须紧跟一个**具体可执行**的未来改进方向（不是"以后注意"这种废话）。
+- 优势要主动说：用户做对的、坚持得好的，明确点出来。
 
 【数据真实性硬约束】
 - 不要编造任何不在下面数据里的信息（PE / 市值 / 行业新闻 / 财报数字）
 - 引用数字必须出自下面"客观快照"段
 - {reasoning_constraint}
 
-# 标的：{ticker_name}（{ticker}）
+# 标的：{ticker_name}（{ticker}）{industry_section}
 
 # 客观快照
 {stats_md}
@@ -300,7 +327,7 @@ _TICKER_REVIEW_PROMPT = """你是一个投资回顾助手。下面是用户某�
 {fundamentals_then_section}
 # 当前基本面
 {fundamentals_now_section}
-# 同期沪深300
+# 同期对比基准
 {benchmark_section}
 
 # 全部操作（按时间顺序）
@@ -316,20 +343,197 @@ _TICKER_REVIEW_PROMPT = """你是一个投资回顾助手。下面是用户某�
 
 # 输出要求
 
-用 Markdown 输出 4 段，总长 400-700 字：
+用 Markdown 输出 5 段，总长 500-800 字。**严格按这个顺序**：
 
 ## 1. 持仓全貌
 基于客观快照 + 操作列表，一段话讲清这只股票的持仓轨迹：何时建仓、加减过几次、当前状态、累计盈亏（含分红）。引用具体数字。
 
-## 2. 逻辑验证
+## 2. 逻辑验证 + 计划兑现度
 {verify_instruction}
+此外**必须显式对比**原始 action_plan（计划）跟实际操作之间的差异：
+- 如果用户写过"操作计划"，把计划逐条列出来，对照实际执行，指出哪里照做了、哪里偏离了
+- 偏离不一定是错（市场变了计划就该调整），但要把事实摆出来
 
-## 3. 结合用户自评的反思
+## 3. 下一步建议
+**具体可执行**：继续持有 / 加仓 / 减仓 / 清仓 + 触发条件 + 数字目标。
+不要含糊地说"密切关注"或"伺机而动"。
+如果该股已清仓，本段改成"复盘要点"：从这段持仓里能带走的最重要的 1-2 条经验。
+
+## 4. 关键风险点（最多 2 条）
+基于上面数据指出**当前持仓最值得警惕的 1-2 个风险**。每条必须挂一个具体数字。
+例：「集中度风险：单股占 A 股账户 28%」「估值悬挂风险：PE 122 倍处于近 3 年 95 分位」
+不要泛泛地说"市场波动"、"政策风险"。
+
+## 5. 结合用户自评的反思
 {self_critique_instruction}
-
-## 4. 下一步建议
-基于上述所有数据给一个**具体可执行**的下一步方向（继续持有 / 加仓 / 减仓 / 清仓），并说明理由。不要含糊地说"密切关注"。如果该股已清仓，本段改成"复盘要点"：从这段持仓里能带走的最重要的 1-2 条经验。
 """
+
+
+# 行业信息缓存（akshare 单股查询慢，存盘）
+import json as _json
+from pathlib import Path
+_INDUSTRY_CACHE_PATH = Path("/tmp/bigv_ticker_industry.json")
+_industry_cache: dict[str, str] = {}
+_industry_loaded = False
+
+
+def _fetch_industry_for(ticker: str) -> str | None:
+    """从 akshare 拉个股的行业归属。失败/无数据返 None。增量磁盘缓存。"""
+    global _industry_loaded
+    if not _industry_loaded:
+        if _INDUSTRY_CACHE_PATH.exists():
+            try:
+                _industry_cache.update(_json.loads(_INDUSTRY_CACHE_PATH.read_text()))
+            except Exception:
+                pass
+        _industry_loaded = True
+    if ticker in _industry_cache:
+        return _industry_cache[ticker] or None
+    try:
+        import akshare as ak
+        df = ak.stock_individual_info_em(symbol=ticker)
+        # df 是 (item, value) 两列
+        ind = None
+        for _, row in df.iterrows():
+            if row.get("item") == "行业":
+                ind = str(row.get("value") or "").strip()
+                break
+        _industry_cache[ticker] = ind or ""
+        try:
+            _INDUSTRY_CACHE_PATH.write_text(_json.dumps(_industry_cache, ensure_ascii=False))
+        except Exception:
+            pass
+        return ind or None
+    except Exception as e:
+        log.warning("industry fetch failed for %s: %s", ticker, e)
+        return None
+
+
+def _fetch_52w_range(ticker: str, today_dt: date) -> tuple[float, float] | None:
+    """近 1 年最高/最低收盘价。失败返 None。"""
+    try:
+        from .backtest import _fetch_price_hist
+        end_str = today_dt.strftime("%Y%m%d")
+        start_str = (today_dt - timedelta(days=370)).strftime("%Y%m%d")
+        df = _fetch_price_hist(ticker, start_str, end_str)
+        if df is None or len(df) == 0:
+            return None
+        # 列名根据 akshare 版本：'收盘'/'最高'/'最低'
+        if "最高" in df.columns and "最低" in df.columns:
+            high = float(df["最高"].max())
+            low = float(df["最低"].min())
+        else:
+            high = float(df["收盘"].max())
+            low = float(df["收盘"].min())
+        return (low, high)
+    except Exception as e:
+        log.warning("52w range fetch failed for %s: %s", ticker, e)
+        return None
+
+
+def _fetch_industry_etf_return(industry: str | None, start_date: date, end_date: date) -> tuple[str, float] | None:
+    """根据行业名查 ETF symbol，拉同期涨跌幅 %。返回 (etf_code_no_prefix, return_pct)."""
+    if not industry:
+        return None
+    sym = _INDUSTRY_TO_ETF.get(industry)
+    if not sym:
+        return None
+    try:
+        from .daily_brief import _fetch_tencent_batch, _parse_index_tilde
+        from .backtest import _fetch_price_hist, _get_close_on_or_after
+        # 拉历史价用 akshare（symbol 去掉前缀只留 6 位）
+        code = sym[2:]
+        df = _fetch_price_hist(code, start_date.strftime("%Y%m%d"),
+                               (end_date + timedelta(days=1)).strftime("%Y%m%d"))
+        if df is None or len(df) == 0:
+            return None
+        s_close = _get_close_on_or_after(df, start_date.strftime("%Y-%m-%d"))
+        e_close = _get_close_on_or_after(df, end_date.strftime("%Y-%m-%d"))
+        if not s_close or not e_close:
+            return None
+        ret = (e_close[1] / s_close[1] - 1.0) * 100.0
+        return (code, ret)
+    except Exception as e:
+        log.warning("industry ETF return fetch failed (%s/%s): %s", industry, sym, e)
+        return None
+
+
+async def _compute_position_pct(user_id: int, ticker: str, ticker_currency: str,
+                                  ticker_market_value: float) -> float | None:
+    """该仓位占总资产比例 %。total_assets = principal + dividend + sum(MV) (per currency)。"""
+    from .db import User
+    async with db._SessionFactory() as s:
+        user = await s.get(User, user_id)
+        rows = await s.execute(
+            select(DecisionJournal).where(
+                DecisionJournal.user_id == user_id,
+                DecisionJournal.status == "active",
+                DecisionJournal.action != "dividend",
+            )
+        )
+        all_active = list(rows.scalars())
+    if not user:
+        return None
+
+    # 拉所有 active ticker 的实时报价（按币种聚合 MV）
+    all_tickers = list({j.ticker for j in all_active})
+    loop = asyncio.get_running_loop()
+    quotes = await loop.run_in_executor(None, get_watchlist_quotes, [_FakeW(t) for t in all_tickers])
+    cur_map = {q["ticker"]: (q.get("current"), q.get("currency", "CNY")) for q in quotes if q.get("ok")}
+
+    # 重建持仓股数（按 ticker 累计 buy/reduce/close）
+    by_ticker: dict[str, list] = {}
+    for j in all_active:
+        by_ticker.setdefault(j.ticker, []).append(j)
+    total_mv_per_ccy: dict[str, float] = {"CNY": 0.0, "HKD": 0.0}
+    for t, ops in by_ticker.items():
+        ops.sort(key=lambda x: x.created_at or "")
+        shares = 0
+        for j in ops:
+            n = j.shares or 0
+            if j.action in ("open", "add"):
+                shares += n
+            elif j.action == "retroactive":
+                shares = n
+            elif j.action == "reduce":
+                shares -= n
+            elif j.action == "close":
+                shares = 0
+        if shares <= 0:
+            continue
+        cur_price, ccy = cur_map.get(t, (None, "CNY"))
+        mv = (cur_price or 0) * shares
+        total_mv_per_ccy[ccy] = total_mv_per_ccy.get(ccy, 0) + mv
+
+    if ticker_currency == "HKD":
+        principal = user.hkd_principal or 0
+        total_mv = total_mv_per_ccy.get("HKD", 0)
+    else:
+        principal = user.cny_principal or 0
+        total_mv = total_mv_per_ccy.get("CNY", 0)
+
+    # dividend 用实时 SUM（已到期的）
+    today_dt = datetime.combine(date.today(), datetime.max.time())
+    div_sum = 0.0
+    async with db._SessionFactory() as s:
+        rows = await s.execute(
+            select(DecisionJournal).where(
+                DecisionJournal.user_id == user_id,
+                DecisionJournal.action == "dividend",
+                DecisionJournal.created_at <= today_dt,
+            )
+        )
+        for j in rows.scalars():
+            from bigv_twins.stock_data import resolve_ticker as _rt
+            info = _rt(j.ticker)
+            ccy = info.currency if info else "CNY"
+            if ccy == ticker_currency:
+                div_sum += (j.price_at_decision or 0) * (j.shares or 0)
+
+    total_assets = principal + div_sum + total_mv
+    if total_assets <= 0:
+        return None
+    return ticker_market_value / total_assets * 100
 
 
 async def generate_review_for_ticker(user_id: int, ticker: str) -> str | None:
@@ -410,6 +614,15 @@ async def generate_review_for_ticker(user_id: int, ticker: str) -> str | None:
         if current_price:
             stats_lines.append(f"- 当前市值：¥{market_value:.0f}（现价 ¥{current_price:.2f}）")
             stats_lines.append(f"- 浮动盈亏：¥{unrealized:+.0f}（{(unrealized/abs(adj_cost_total)*100 if adj_cost_total else 0):+.1f}%，已包含分红反哺）")
+        # 仓位占总账户多少
+        ticker_currency = quote.get("currency") or "CNY"
+        try:
+            pct = await _compute_position_pct(user_id, ticker, ticker_currency, market_value)
+            if pct is not None:
+                ccy_label = "A股账户" if ticker_currency == "CNY" else "港股账户"
+                stats_lines.append(f"- 该仓位占{ccy_label}总资产：{pct:.1f}%")
+        except Exception as e:
+            log.warning("position pct compute failed for %s: %s", ticker, e)
     stats_md = "\n".join(stats_lines)
 
     # 基本面
@@ -430,6 +643,15 @@ async def generate_review_for_ticker(user_id: int, ticker: str) -> str | None:
         except (json.JSONDecodeError, TypeError):
             pass
 
+    # 行业（仅 A 股）+ 52 周区间
+    industry_section = ""
+    industry: str | None = None
+    is_a_share = ticker.isdigit() and len(ticker) == 6
+    if is_a_share:
+        industry = await loop.run_in_executor(None, _fetch_industry_for, ticker)
+        if industry:
+            industry_section = f"\n# 所属行业\n- {industry}\n"
+
     fundamentals_now_section = ""
     bits = []
     if quote.get("pe") is not None:
@@ -440,9 +662,22 @@ async def generate_review_for_ticker(user_id: int, ticker: str) -> str | None:
         bits.append(f"市值 {quote['market_cap']:.0f} 亿")
     if bits:
         fundamentals_now_section = f"- {' / '.join(bits)}\n"
+    # 52 周区间（A 股）
+    if is_a_share and current_price:
+        rng = await loop.run_in_executor(None, _fetch_52w_range, ticker, date.today())
+        if rng:
+            low, high = rng
+            if high > low:
+                pct_in_range = (current_price - low) / (high - low) * 100
+                pos_label = "底部" if pct_in_range < 25 else ("中部" if pct_in_range < 75 else "顶部")
+                fundamentals_now_section += (
+                    f"- 当前 ¥{current_price:.2f} 处于 52 周区间 ¥{low:.2f}-¥{high:.2f}，"
+                    f"分位 {pct_in_range:.0f}%（{pos_label}）\n"
+                )
 
-    # 沪深300 同期
+    # 沪深300 同期 + 同行业 ETF 同期
     benchmark_section = ""
+    csi_ret = None
     try:
         from .backtest import _fetch_benchmark_hist, _get_close_on_or_after
         df = await loop.run_in_executor(
@@ -458,6 +693,34 @@ async def generate_review_for_ticker(user_id: int, ticker: str) -> str | None:
                 benchmark_section = f"- 沪深300 同期涨跌：{csi_ret:+.1f}%\n"
     except Exception as e:
         log.warning("csi300 fetch for ticker review failed: %s", e)
+    # 同行业 ETF
+    if is_a_share and industry:
+        try:
+            ind_ret_pair = await loop.run_in_executor(
+                None, _fetch_industry_etf_return, industry, earliest_date, date.today()
+            )
+            if ind_ret_pair:
+                etf_code, ind_ret = ind_ret_pair
+                # 这只票的同期收益
+                from .backtest import _fetch_price_hist, _get_close_on_or_after as _gc
+                df_t = await loop.run_in_executor(
+                    None, _fetch_price_hist, ticker,
+                    earliest_date.strftime("%Y%m%d"),
+                    (date.today() + timedelta(days=1)).strftime("%Y%m%d"),
+                )
+                ticker_ret = None
+                if df_t is not None and len(df_t) > 0:
+                    s = _gc(df_t, earliest_date.strftime("%Y-%m-%d"))
+                    e_ = _gc(df_t, date.today().strftime("%Y-%m-%d"))
+                    if s and e_:
+                        ticker_ret = (e_[1] / s[1] - 1.0) * 100
+                line = f"- 同行业 {industry} 指数（{etf_code} ETF）同期：{ind_ret:+.1f}%"
+                if ticker_ret is not None:
+                    excess = ticker_ret - ind_ret
+                    line += f"，本股同期 {ticker_ret:+.1f}%，超额 {excess:+.1f}%"
+                benchmark_section += line + "\n"
+        except Exception as e:
+            log.warning("industry ETF block failed: %s", e)
 
     # 操作列表
     op_lines = []
@@ -534,6 +797,7 @@ async def generate_review_for_ticker(user_id: int, ticker: str) -> str | None:
     prompt = _TICKER_REVIEW_PROMPT.format(
         ticker=ticker,
         ticker_name=ticker_name,
+        industry_section=industry_section,  # 可空字符串
         stats_md=stats_md,
         fundamentals_then_section=fundamentals_then_section or "（无快照数据）",
         fundamentals_now_section=fundamentals_now_section or "（拉取失败）",
