@@ -679,14 +679,7 @@ async def journal_detail(
 
     snapshot = json.loads(journal.stock_snapshot) if journal.stock_snapshot else None
     opinions = json.loads(journal.blogger_opinions) if journal.blogger_opinions else []
-
-    # Fetch reviews for this journal
-    review_rows = await session.execute(
-        select(DecisionReview).where(
-            DecisionReview.journal_id == jid
-        ).order_by(DecisionReview.created_at.desc())
-    )
-    reviews = list(review_rows.scalars())
+    # v0.7: 不再 fetch per-journal reviews — 回顾改 per-ticker，在 /stock/{ticker} 看
 
     return templates.TemplateResponse(
         request=request,
@@ -698,7 +691,6 @@ async def journal_detail(
             "pnl_pct": pnl_pct,
             "snapshot": snapshot,
             "opinions": opinions,
-            "reviews": reviews,
         },
     )
 
@@ -915,53 +907,17 @@ async def journal_close(
 
 
 @router.post("/{jid}/review/now")
-async def manual_review(
+async def manual_review_redirect(
     jid: int,
     user: Annotated[User, Depends(auth.require_user)],
     session: Annotated[AsyncSession, Depends(db.get_session)],
 ):
-    """Manually trigger a review for a journal entry."""
+    """Legacy 路由 — v0.7 起回顾改 per-ticker，转发到 /stock/{ticker}/review/now。"""
     journal = await session.get(DecisionJournal, jid)
     if not journal or journal.user_id != user.id:
         raise HTTPException(status_code=404)
-    from .review_engine import generate_review_for_journal, _FakeW as RFakeW
-    report_md = await generate_review_for_journal(journal)
-    if report_md:
-        quotes = get_watchlist_quotes([_FakeW(journal.ticker)])
-        current_price = quotes[0].get("current") if quotes else None
-        pnl_pct = None
-        if current_price and journal.price_at_decision:
-            pnl_pct = (current_price - journal.price_at_decision) / journal.price_at_decision * 100
-        review = DecisionReview(
-            journal_id=jid,
-            user_id=user.id,
-            review_type="manual",
-            current_price=current_price,
-            price_change_pct=pnl_pct,
-            review_report_md=report_md,
-        )
-        session.add(review)
-        await session.commit()
-    return RedirectResponse(f"/journal/{jid}", status_code=303)
+    return RedirectResponse(f"/stock/{journal.ticker}/review/now", status_code=307)
 
-
-@router.post("/review/{rid}/reflect")
-async def submit_reflection(
-    rid: int,
-    user: Annotated[User, Depends(auth.require_user)],
-    session: Annotated[AsyncSession, Depends(db.get_session)],
-    user_reflection: str = Form(""),
-    lesson_learned: str = Form(""),
-    action_taken: str = Form(""),
-):
-    review = await session.get(DecisionReview, rid)
-    if not review or review.user_id != user.id:
-        raise HTTPException(status_code=404)
-    review.user_reflection = user_reflection or None
-    review.lesson_learned = lesson_learned or None
-    review.action_taken = action_taken or None
-    await session.commit()
-    return RedirectResponse(f"/journal/{review.journal_id}", status_code=303)
 
 @router.post("/note")
 async def create_note(

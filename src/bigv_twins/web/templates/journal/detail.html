@@ -123,70 +123,12 @@
 
 <!-- Reviews -->
 <section class="detail-section">
-  <div style="display:flex; justify-content:space-between; align-items:center">
-    <h3>📋 回顾记录</h3>
-    {% if j.status == 'active' %}
-    <form method="post" action="/journal/{{ j.id }}/review/now" style="margin:0">
-      <button type="submit" class="secondary outline" style="padding:0.3rem 0.8rem; font-size:0.8rem">立即回顾</button>
-    </form>
-    {% endif %}
-  </div>
-  {% if reviews %}
-    {% for r in reviews %}
-    <div class="review-card">
-      <div class="review-head">
-        <span class="review-type">
-          {% if r.review_type == '1week' %}1周回顾
-          {% elif r.review_type == '1month' %}1月回顾
-          {% elif r.review_type == '3month' %}3月回顾
-          {% elif r.review_type == '6month' %}半年回顾
-          {% elif r.review_type == 'manual' %}手动回顾
-          {% else %}{{ r.review_type }}{% endif %}
-        </span>
-        <small class="muted">{{ r.created_at.strftime("%Y-%m-%d") if r.created_at else "" }}</small>
-        {% if r.current_price %}
-          <span class="{% if r.price_change_pct and r.price_change_pct > 0 %}up{% elif r.price_change_pct and r.price_change_pct < 0 %}down{% endif %}">
-            ¥{{ "%.2f"|format(r.current_price) }} ({{ "%+.1f%%"|format(r.price_change_pct) if r.price_change_pct else "—" }})
-          </span>
-        {% endif %}
-      </div>
-      {% if r.review_report_md %}
-        <div class="review-body">{{ r.review_report_md }}</div>
-      {% endif %}
-      {% if r.user_reflection %}
-        <div class="review-reflection">
-          <small class="muted">我的反思：</small>{{ r.user_reflection }}
-        </div>
-      {% elif j.status == 'active' %}
-        <details class="review-reflect-form">
-          <summary style="font-size:0.8rem; color:#666; cursor:pointer">写反思</summary>
-          <form method="post" action="/journal/review/{{ r.id }}/reflect" style="margin-top:0.5rem">
-            <textarea name="user_reflection" rows="2" placeholder="这次决策做得好的地方？需要改进的？" style="font-size:0.85rem"></textarea>
-            <div style="display:flex; gap:0.5rem; margin-top:0.3rem">
-              <input name="lesson_learned" placeholder="经验教训（一句话）" style="font-size:0.82rem; flex:1">
-              <select name="action_taken" style="font-size:0.82rem; width:auto">
-                <option value="">后续操作</option>
-                <option value="keep">继续持有</option>
-                <option value="add">加仓</option>
-                <option value="reduce">减仓</option>
-                <option value="close">清仓</option>
-              </select>
-              <button type="submit" style="padding:0.2rem 0.6rem; font-size:0.8rem; width:auto">保存</button>
-            </div>
-          </form>
-        </details>
-      {% endif %}
-    </div>
-    {% endfor %}
-  {% else %}
-    <p class="muted" style="font-size:0.85rem">
-      {% if j.status == 'active' %}
-        系统将在 7 天后自动生成第一次回顾（{{ j.next_review_at or "待设定" }}）。也可以点击上方按钮手动触发。
-      {% else %}
-        该记录已关闭，无更多回顾。
-      {% endif %}
-    </p>
-  {% endif %}
+  <h3>📋 AI 回顾</h3>
+  <p class="muted" style="font-size:0.85rem">
+    v0.7 起 AI 回顾改成 <strong>按股票</strong>（而不是按单笔操作）— 综合该股
+    全部买卖 + 自评 + 客观快照一起评。每周六 20:00 自动生成。
+    <a href="/stock/{{ j.ticker }}#review">查看 {{ j.ticker_name }} 的全部 AI 回顾 →</a>
+  </p>
 </section>
 
 <!-- Close position -->
