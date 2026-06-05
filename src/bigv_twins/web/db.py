@@ -248,11 +248,10 @@ class BloggerDailyBrief(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     blogger_slug: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     brief_date: Mapped[str] = mapped_column(String(10), nullable=False, index=True)  # 'YYYY-MM-DD'
-    # Markdown 文本，包含「主要观点」+「后续建议」两段
     brief_md: Mapped[str] = mapped_column(Text, nullable=False)
-    # JSON 数组：当日提到的 ticker codes, e.g. '["600519","00700"]'
+    # 完整结构化 JSON（main_view, key_quotes, ticker_opinions 等 7 字段原样存储）
+    brief_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     mentioned_tickers: Mapped[str] = mapped_column(Text, default="[]", nullable=False)
-    # 当日新内容条数（answer + article + pin 合计），便于 UI 展示
     post_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     generated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
 
@@ -396,6 +395,9 @@ class TickerOpinionLog(Base):
     blogger_slug: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     opinion_date: Mapped[str] = mapped_column(String(10), nullable=False)
     sentiment: Mapped[str] = mapped_column(String(16), nullable=False)
+    confidence: Mapped[str] = mapped_column(String(16), default="medium", nullable=False)
+    horizon: Mapped[str] = mapped_column(String(16), default="unspecified", nullable=False)
+    is_pivot: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     summary: Mapped[str] = mapped_column(Text, nullable=False)
     source_brief_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     price_at_opinion: Mapped[float | None] = mapped_column(Float, nullable=True)

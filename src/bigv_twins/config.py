@@ -66,11 +66,28 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _BLOGGERS_JSON = _PROJECT_ROOT / "bloggers.json"
 
 
+_FALLBACK_BLOGGER_SLUGS = {"mr-dang", "eyu", "sanren", "shen", "paipi"}
+
+
 def _load_bloggers() -> tuple[Blogger, ...]:
-    """Read bloggers from bloggers.json (canonical source of truth)."""
+    """Read bloggers from bloggers.json (canonical source of truth).
+
+    If bloggers.json doesn't exist, uses a hardcoded fallback tuple
+    (dev-only). A startup assertion checks that the fallback stays in
+    sync with bloggers.json whenever the JSON is present.
+    """
     if _BLOGGERS_JSON.exists():
         data = json.loads(_BLOGGERS_JSON.read_text(encoding="utf-8"))
-        return tuple(Blogger(**b) for b in data)
+        loaded = tuple(Blogger(**b) for b in data)
+        json_blogger_slugs = {b.slug for b in loaded if b.is_blogger}
+        if json_blogger_slugs != _FALLBACK_BLOGGER_SLUGS:
+            import warnings
+            warnings.warn(
+                f"bloggers.json blogger slugs {json_blogger_slugs} != "
+                f"fallback {_FALLBACK_BLOGGER_SLUGS} — update _FALLBACK_BLOGGER_SLUGS in config.py",
+                stacklevel=2,
+            )
+        return loaded
     return (
         Blogger(slug="mr-dang", author_id=1, url_token="mr-dang-77",       name="MR Dang"),
         Blogger(slug="eyu",     author_id=2, url_token="chen-ze-xin-49-22", name="寒武纪的鳄鱼"),

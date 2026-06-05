@@ -70,7 +70,7 @@ def fetch_blogger_posts_for_day(author_id: int, day_str: str) -> list[dict]:
                 "zhihu_id": zid,
                 "content_type": ctype,
                 "title": title or "",
-                "text": _strip_html(content)[:1500],  # cap to keep prompt manageable
+                "text": _strip_html(content)[:3000],
                 "url": url or "",
                 "voteup_count": int(votes or 0),
                 "created_time": ct,
@@ -323,6 +323,89 @@ async def _call_qoder_brief(prompt: str, blogger_slug: str) -> str | None:
     return text or None
 
 
+def _render_brief_md(result: dict) -> str:
+    """把 summarize_blogger 返回的结构化 dict 渲染成 brief_md markdown。"""
+    parts = [f"**主要观点**：{result['main_view']}"]
+    if result.get("key_quotes"):
+        quotes = " / ".join(f"「{q}」" for q in result["key_quotes"])
+        parts.append(f"**金句**：{quotes}")
+    if result.get("key_events_mentioned"):
+        parts.append(f"**关键事件 / 数字**：{' · '.join(result['key_events_mentioned'])}")
+    if result.get("actions_self_disclosed"):
+        act_lines = []
+        for a in result["actions_self_disclosed"]:
+            seg = f"{a.get('action', '')} {a.get('ticker_name', '')}({a.get('ticker', '')})"
+            if a.get("size"):
+                seg += f" {a['size']}"
+            if a.get("rationale"):
+                seg += f" — {a['rationale']}"
+            act_lines.append(seg.strip())
+        parts.append("**博主自报操作**：" + " / ".join(act_lines))
+    if result.get("ticker_opinions"):
+        _SENT_LABEL = {"bullish": "看多", "bearish": "看空",
+                       "avoid": "回避", "neutral": "中性"}
+        op_lines = []
+        for op in result["ticker_opinions"]:
+            label = _SENT_LABEL.get(op["sentiment"], op["sentiment"])
+            conf = op.get("confidence", "")
+            line = f"{op['ticker_name']}({op['ticker']}) {label}"
+            if conf:
+                line += f"/{conf}"
+            if op.get("is_pivot"):
+                line += " [转向]"
+            if op.get("summary"):
+                line += f" — {op['summary']}"
+            op_lines.append(line)
+        parts.append("**个股情绪**：" + " | ".join(op_lines))
+    parts.append(f"**后续建议**：{result['suggestion']}")
+    if result.get("vs_yesterday") and result["vs_yesterday"] not in ("—", ""):
+        parts.append(f"**vs 昨日**：{result['vs_yesterday']}")
+    return "\n\n".join(parts)
+
+
+async def _generate_one_brief(b, day_str: str) -> tuple[str, str, dict | None, int]:
+    """为单个博主生成 brief。返回 (slug, status, result, post_count)。
+    status: "generated" | "skipped" | "error"
+    """
+    async with db._SessionFactory() as s:
+        existing = await s.execute(
+            select(BloggerDailyBrief)
+            .where(BloggerDailyBrief.blogger_slug == b.slug)
+            .where(BloggerDailyBrief.brief_date == day_str)
+        )
+        if existing.scalar_one_or_none() is not None:
+            return (b.slug, "skipped", None, 0)
+
+    try:
+        posts = fetch_blogger_posts_for_day(b.author_id, day_str)
+        log.info("  [%s] %d posts for %s", b.slug, len(posts), day_str)
+        result = await summarize_blogger(b.slug, b.name, posts)
+    except Exception as e:
+        log.exception("blogger %s brief generation failed: %s", b.slug, e)
+        return (b.slug, "error", None, 0)
+
+    brief_md = _render_brief_md(result)
+    async with db._SessionFactory() as s:
+        row = BloggerDailyBrief(
+            blogger_slug=b.slug,
+            brief_date=day_str,
+            brief_md=brief_md,
+            brief_json=json.dumps(result, ensure_ascii=False),
+            mentioned_tickers=json.dumps(result["mentioned_tickers"], ensure_ascii=False),
+            post_count=len(posts),
+        )
+        s.add(row)
+        try:
+            await s.commit()
+            if result.get("ticker_opinions"):
+                await _write_opinion_log(b.slug, day_str, row.id,
+                                          result["ticker_opinions"])
+            return (b.slug, "generated", result, len(posts))
+        except IntegrityError:
+            await s.rollback()
+            return (b.slug, "skipped", None, len(posts))
+
+
 async def generate_briefs_for_day(day_str: str | None = None) -> dict[str, int]:
     """Main entry. Generate one brief per eligible blogger for given day
     (default: 前一自然日). Idempotent — UPSERTs via (slug, date) UNIQUE constraint.
@@ -336,70 +419,25 @@ async def generate_briefs_for_day(day_str: str | None = None) -> dict[str, int]:
     bloggers = _eligible_bloggers()
     log.info("generate_briefs_for_day(%s) — %d bloggers", day_str, len(bloggers))
 
-    generated = 0
-    skipped = 0
-    errors = 0
+    import asyncio
+    results = await asyncio.gather(
+        *[_generate_one_brief(b, day_str) for b in bloggers],
+        return_exceptions=True,
+    )
 
-    for b in bloggers:
-        # Skip if brief already exists for this slug+date
-        async with db._SessionFactory() as s:
-            existing = await s.execute(
-                select(BloggerDailyBrief)
-                .where(BloggerDailyBrief.blogger_slug == b.slug)
-                .where(BloggerDailyBrief.brief_date == day_str)
-            )
-            if existing.scalar_one_or_none() is not None:
-                skipped += 1
-                continue
-
-        try:
-            posts = fetch_blogger_posts_for_day(b.author_id, day_str)
-            log.info("  [%s] %d posts for %s", b.slug, len(posts), day_str)
-            result = await summarize_blogger(b.slug, b.name, posts)
-        except Exception as e:
-            log.exception("blogger %s brief generation failed: %s", b.slug, e)
+    generated = skipped = errors = 0
+    for r in results:
+        if isinstance(r, Exception):
+            log.exception("unexpected brief generation error: %s", r)
             errors += 1
-            continue
-
-        # 富 brief_md：把新加的几个字段也展示出来，下游 /report 等页面直接渲染就有
-        parts = [f"**主要观点**：{result['main_view']}"]
-        if result.get("key_quotes"):
-            quotes = " / ".join(f"「{q}」" for q in result["key_quotes"])
-            parts.append(f"**金句**：{quotes}")
-        if result.get("key_events_mentioned"):
-            parts.append(f"**关键事件 / 数字**：{' · '.join(result['key_events_mentioned'])}")
-        if result.get("actions_self_disclosed"):
-            act_lines = []
-            for a in result["actions_self_disclosed"]:
-                seg = f"{a.get('action', '')} {a.get('ticker_name', '')}({a.get('ticker', '')})"
-                if a.get("size"): seg += f" {a['size']}"
-                if a.get("rationale"): seg += f" — {a['rationale']}"
-                act_lines.append(seg.strip())
-            parts.append("**博主自报操作**：" + " / ".join(act_lines))
-        parts.append(f"**后续建议**：{result['suggestion']}")
-        if result.get("vs_yesterday") and result["vs_yesterday"] not in ("—", ""):
-            parts.append(f"**vs 昨日**：{result['vs_yesterday']}")
-        brief_md = "\n\n".join(parts)
-        async with db._SessionFactory() as s:
-            row = BloggerDailyBrief(
-                blogger_slug=b.slug,
-                brief_date=day_str,
-                brief_md=brief_md,
-                mentioned_tickers=json.dumps(result["mentioned_tickers"], ensure_ascii=False),
-                post_count=len(posts),
-            )
-            s.add(row)
-            try:
-                await s.commit()
+        else:
+            _slug, status, _result, _pc = r
+            if status == "generated":
                 generated += 1
-                # 把 brief LLM 一次性输出的 ticker_opinions 直接写入 ticker_opinion_log
-                # （之前是再调一次 LLM 反推情绪 → 又慢又有信息损失）
-                if result.get("ticker_opinions"):
-                    await _write_opinion_log(b.slug, day_str, row.id,
-                                              result["ticker_opinions"])
-            except IntegrityError:
-                await s.rollback()
-                skipped += 1  # race with another instance
+            elif status == "skipped":
+                skipped += 1
+            else:
+                errors += 1
 
     log.info("generate_briefs_for_day(%s) done in %.1fs: generated=%d skipped=%d errors=%d",
              day_str, time.time() - t0, generated, skipped, errors)
@@ -408,7 +446,7 @@ async def generate_briefs_for_day(day_str: str | None = None) -> dict[str, int]:
 
 async def _write_opinion_log(blogger_slug: str, brief_date: str,
                               brief_id: int, opinions: list[dict]) -> int:
-    """把 ticker_opinions 列表写入 ticker_opinion_log 表。重复条目静默跳过。"""
+    """把 ticker_opinions 列表写入 ticker_opinion_log 表。"""
     count = 0
     async with db._SessionFactory() as session:
         for op in opinions:
@@ -419,6 +457,9 @@ async def _write_opinion_log(blogger_slug: str, brief_date: str,
                     blogger_slug=blogger_slug,
                     opinion_date=brief_date,
                     sentiment=op["sentiment"],
+                    confidence=op.get("confidence", "medium"),
+                    horizon=op.get("horizon", "unspecified"),
+                    is_pivot=op.get("is_pivot", False),
                     summary=op.get("summary", "")[:100],
                     source_brief_id=brief_id,
                 ))
