@@ -36,7 +36,7 @@ def _eligible_bloggers():
 
 
 def _open_zhihu_ro() -> sqlite3.Connection:
-    uri = f"file:{settings.zhihu_db_path}?mode=ro&immutable=1"
+    uri = f"file:{settings.zhihu_db_path}?mode=ro"
     return sqlite3.connect(uri, uri=True)
 
 
