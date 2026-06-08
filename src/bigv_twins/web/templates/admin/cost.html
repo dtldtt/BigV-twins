@@ -45,6 +45,18 @@
     </div>
     {% endif %}
 
+    {% if qoder_stats.by_model %}
+    <div style="font-size:0.82rem; margin-bottom:0.6rem">
+      <div class="muted" style="margin-bottom:0.3rem">按模型分级</div>
+      {% for m in qoder_stats.by_model %}
+      <div style="display:flex; justify-content:space-between; padding:0.15rem 0; border-bottom:1px solid #f3f4f6">
+        <span><strong>{{ m.model }}</strong></span>
+        <span>{{ m.calls }}次 · 输入 {{ "{:,}".format(m.input) }} · 输出 {{ "{:,}".format(m.output) }}</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
     {% if qoder_stats.daily %}
     <div style="font-size:0.82rem">
       <div class="muted" style="margin-bottom:0.3rem">每日趋势（最近 7 天）</div>
@@ -66,7 +78,7 @@
       <summary style="cursor:pointer; font-size:0.82rem; color:#666">最近调用记录</summary>
       <table style="width:100%; font-size:0.78rem; margin-top:0.3rem; border-collapse:collapse">
         <thead><tr style="border-bottom:2px solid #e5e7eb; text-align:left">
-          <th style="padding:0.25rem">时间</th><th>任务</th><th>详情</th><th>输入</th><th>输出</th><th>耗时</th>
+          <th style="padding:0.25rem">时间</th><th>任务</th><th>详情</th><th>模型</th><th>输入</th><th>输出</th><th>耗时</th>
         </tr></thead>
         <tbody>
         {% for r in qoder_stats.recent %}
@@ -74,6 +86,7 @@
           <td style="padding:0.2rem">{{ r.created_at.strftime("%m-%d %H:%M") if r.created_at else "" }}</td>
           <td>{{ r.task_type }}</td>
           <td>{{ r.task_detail or "" }}</td>
+          <td>{{ r.model }}</td>
           <td>{{ "{:,}".format(r.input_tokens) }}</td>
           <td>{{ "{:,}".format(r.output_tokens) }}</td>
           <td>{{ "%.0f"|format(r.duration_ms / 1000) }}s</td>
@@ -130,11 +143,43 @@
   </article>
 </div>
 
-<!-- Monthly archive -->
-<details style="margin-top:1.5rem">
-  <summary style="cursor:pointer"><strong>📅 Qwen 月度账单归档</strong> <small class="muted">按计费周期归档</small></summary>
-  <div id="monthly-list" style="margin-top:0.6rem"><p class="muted">加载中…</p></div>
-</details>
+<!-- Qoder Monthly Archive -->
+{% if qoder_stats.monthly %}
+<div style="margin-top:1.5rem">
+  <h3 style="margin:0 0 0.6rem">📅 Qoder 月度归档</h3>
+  {% for mo in qoder_stats.monthly %}
+  <details style="border:1px solid #e0e3ed; border-radius:6px; margin-bottom:0.5rem">
+    <summary style="padding:0.5rem 0.8rem; background:#f8f9fa; cursor:pointer; font-size:0.85rem">
+      <strong>{{ mo.month }}</strong> · {{ mo.total_calls }}次 · 输入 {{ "{:,}".format(mo.total_input) }} · 输出 {{ "{:,}".format(mo.total_output) }}
+    </summary>
+    <div style="padding:0.6rem 0.8rem; font-size:0.82rem">
+      <table style="width:100%; border-collapse:collapse">
+        <thead><tr style="border-bottom:2px solid #e5e7eb; text-align:left; font-size:0.78rem">
+          <th style="padding:0.3rem">模型</th><th>调用</th><th>输入 tok</th><th>输出 tok</th><th>耗时</th>
+        </tr></thead>
+        <tbody>
+        {% for m in mo.models %}
+        <tr style="border-bottom:1px solid #f3f4f6">
+          <td style="padding:0.25rem"><strong>{{ m.model }}</strong></td>
+          <td>{{ m.calls }}</td>
+          <td>{{ "{:,}".format(m.input) }}</td>
+          <td>{{ "{:,}".format(m.output) }}</td>
+          <td>{{ m.duration_min }} min</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- Qwen Monthly Archive (default open, each month collapsed) -->
+<div style="margin-top:1.5rem">
+  <h3 style="margin:0 0 0.6rem">📅 Qwen 月度账单归档</h3>
+  <div id="monthly-list"><p class="muted">加载中…</p></div>
+</div>
 
 <script src="/static/vendor/chart.umd.min.js"></script>
 <script>

@@ -113,6 +113,40 @@ async def cost_dashboard(
         )
         qoder_stats["recent"] = list(qr4.scalars())
 
+        # Qoder: by model
+        qr5 = await s.execute(
+            select(
+                QoderUsageLog.model,
+                sqlfunc.count().label("calls"),
+                sqlfunc.sum(QoderUsageLog.input_tokens).label("input"),
+                sqlfunc.sum(QoderUsageLog.output_tokens).label("output"),
+            ).where(QoderUsageLog.created_at >= seven_days_ago)
+            .group_by(QoderUsageLog.model)
+        )
+        qoder_stats["by_model"] = [{"model": r.model, "calls": r.calls,
+                                     "input": r.input or 0, "output": r.output or 0} for r in qr5]
+
+        # Qoder: monthly archive
+        qr6 = await s.execute(
+            select(
+                sqlfunc.strftime("%Y-%m", QoderUsageLog.created_at).label("month"),
+                QoderUsageLog.model,
+                sqlfunc.count().label("calls"),
+                sqlfunc.sum(QoderUsageLog.input_tokens).label("input"),
+                sqlfunc.sum(QoderUsageLog.output_tokens).label("output"),
+                sqlfunc.sum(QoderUsageLog.duration_ms).label("duration"),
+            ).group_by(sqlfunc.strftime("%Y-%m", QoderUsageLog.created_at), QoderUsageLog.model)
+            .order_by(sqlfunc.strftime("%Y-%m", QoderUsageLog.created_at).desc())
+        )
+        monthly_raw = {}
+        for r in qr6:
+            mo = monthly_raw.setdefault(r.month, {"month": r.month, "models": [], "total_calls": 0, "total_input": 0, "total_output": 0})
+            mo["models"].append({"model": r.model, "calls": r.calls, "input": r.input or 0, "output": r.output or 0, "duration_min": round((r.duration or 0)/60000, 1)})
+            mo["total_calls"] += r.calls
+            mo["total_input"] += (r.input or 0)
+            mo["total_output"] += (r.output or 0)
+        qoder_stats["monthly"] = list(monthly_raw.values())
+
     return templates.TemplateResponse(
         request=request, name="admin/cost.html",
         context={"user": admin_user, "qoder_stats": qoder_stats},
