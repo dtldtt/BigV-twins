@@ -54,25 +54,26 @@ def _strip_html(s: str) -> str:
 def fetch_blogger_posts_for_day(author_id: int, day_str: str) -> list[dict]:
     """Pull all answer/article/pin entries created_time on the given day.
 
-    Returns oldest-first list of {zhihu_id, content_type, title, text, url, votes, created_time}.
+    Returns oldest-first list of dicts with zhihu_id, content_type, title, text, url, archive_url, votes, created_time.
     """
     src = _open_zhihu_ro()
     try:
         sql = (
-            "SELECT zhihu_id, content_type, title, content, voteup_count, url, created_time "
+            "SELECT id, zhihu_id, content_type, title, content, voteup_count, url, created_time "
             "FROM contents WHERE author_id = ? AND content IS NOT NULL AND content <> '' "
             "AND date(created_time) = ? ORDER BY created_time"
         )
         rows = src.execute(sql, (author_id, day_str)).fetchall()
         out = []
         for r in rows:
-            zid, ctype, title, content, votes, url, ct = r
+            db_id, zid, ctype, title, content, votes, url, ct = r
             out.append({
                 "zhihu_id": zid,
                 "content_type": ctype,
                 "title": title or "",
                 "text": _strip_html(content)[:3000],
                 "url": url or "",
+                "archive_url": f"https://8-155-174-112.nip.io:8000/content/{db_id}",
                 "voteup_count": int(votes or 0),
                 "created_time": ct,
             })
@@ -267,43 +268,65 @@ async def _call_qoder_brief(prompt: str, blogger_slug: str) -> str | None:
     return text or None
 
 
-def _render_brief_md(result: dict) -> str:
+def _render_brief_md(result: dict, posts: list[dict] | None = None) -> str:
     """把 summarize_blogger 返回的结构化 dict 渲染成 brief_md markdown。"""
-    parts = [f"**主要观点**：{result['main_view']}"]
+    _SENT_LABEL = {"bullish": "📈 看多", "bearish": "📉 看空",
+                   "avoid": "⚠️ 回避", "neutral": "➖ 中性"}
+
+    parts = [f"### 主要观点\n\n{result['main_view']}"]
+
     if result.get("key_quotes"):
-        quotes = " / ".join(f"「{q}」" for q in result["key_quotes"])
-        parts.append(f"**金句**：{quotes}")
+        quotes = "\n".join(f"- 「{q}」" for q in result["key_quotes"])
+        parts.append(f"### 金句\n\n{quotes}")
+
     if result.get("key_events_mentioned"):
-        parts.append(f"**关键事件 / 数字**：{' · '.join(result['key_events_mentioned'])}")
+        events = "\n".join(f"- {e}" for e in result["key_events_mentioned"])
+        parts.append(f"### 关键事件\n\n{events}")
+
     if result.get("actions_self_disclosed"):
         act_lines = []
         for a in result["actions_self_disclosed"]:
-            seg = f"{a.get('action', '')} {a.get('ticker_name', '')}({a.get('ticker', '')})"
+            seg = f"**{a.get('action', '')}** {a.get('ticker_name', '')}({a.get('ticker', '')})"
             if a.get("size"):
                 seg += f" {a['size']}"
             if a.get("rationale"):
                 seg += f" — {a['rationale']}"
-            act_lines.append(seg.strip())
-        parts.append("**博主自报操作**：" + " / ".join(act_lines))
+            act_lines.append(f"- {seg.strip()}")
+        parts.append("### 博主自报操作\n\n" + "\n".join(act_lines))
+
     if result.get("ticker_opinions"):
-        _SENT_LABEL = {"bullish": "看多", "bearish": "看空",
-                       "avoid": "回避", "neutral": "中性"}
         op_lines = []
         for op in result["ticker_opinions"]:
             label = _SENT_LABEL.get(op["sentiment"], op["sentiment"])
+            line = f"- **{op['ticker_name']}**({op.get('ticker', '')}) {label}"
             conf = op.get("confidence", "")
-            line = f"{op['ticker_name']}({op['ticker']}) {label}"
             if conf:
-                line += f"/{conf}"
+                line += f" · {conf}"
             if op.get("is_pivot"):
-                line += " [转向]"
+                line += " **[转向]**"
             if op.get("summary"):
-                line += f" — {op['summary']}"
+                line += f"\n  > {op['summary']}"
             op_lines.append(line)
-        parts.append("**个股情绪**：" + " | ".join(op_lines))
-    parts.append(f"**后续建议**：{result['suggestion']}")
+        parts.append("### 个股情绪\n\n" + "\n".join(op_lines))
+
+    parts.append(f"### 后续建议\n\n{result['suggestion']}")
+
     if result.get("vs_yesterday") and result["vs_yesterday"] not in ("—", ""):
-        parts.append(f"**vs 昨日**：{result['vs_yesterday']}")
+        parts.append(f"### vs 昨日\n\n{result['vs_yesterday']}")
+
+    if posts:
+        links = []
+        for p in posts:
+            ctype_label = {"answer": "回答", "article": "文章", "pin": "想法"}.get(
+                p["content_type"], p["content_type"])
+            title = p["title"] or f"{ctype_label}（{p['created_time'][:16]}）"
+            archive = p.get("archive_url", p.get("url", ""))
+            if archive:
+                links.append(f"- [{title}]({archive})")
+            else:
+                links.append(f"- {title}")
+        parts.append("### 原文链接\n\n" + "\n".join(links))
+
     return "\n\n".join(parts)
 
 
@@ -328,7 +351,7 @@ async def _generate_one_brief(b, day_str: str) -> tuple[str, str, dict | None, i
         log.exception("blogger %s brief generation failed: %s", b.slug, e)
         return (b.slug, "error", None, 0)
 
-    brief_md = _render_brief_md(result)
+    brief_md = _render_brief_md(result, posts=posts)
     async with db._SessionFactory() as s:
         row = BloggerDailyBrief(
             blogger_slug=b.slug,
