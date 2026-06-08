@@ -440,12 +440,11 @@ async def _write_opinion_log(blogger_slug: str, brief_date: str,
 
 
 async def get_latest_briefs() -> list[BloggerDailyBrief]:
-    """For UI: get yesterday's brief for each eligible blogger.
+    """For UI: get each blogger's most recent brief that has actual posts.
 
-    If yesterday's brief doesn't exist (e.g. job hasn't run yet today), fall
-    back to the most recent available brief for that blogger.
+    Falls back to the latest brief with post_count > 0 so weekends/holidays
+    don't show empty cards.
     """
-    day_str = _yesterday_str()
     bloggers = _eligible_bloggers()
     out: list[BloggerDailyBrief] = []
     async with db._SessionFactory() as s:
@@ -453,18 +452,11 @@ async def get_latest_briefs() -> list[BloggerDailyBrief]:
             row = await s.execute(
                 select(BloggerDailyBrief)
                 .where(BloggerDailyBrief.blogger_slug == b.slug)
-                .where(BloggerDailyBrief.brief_date == day_str)
+                .where(BloggerDailyBrief.post_count > 0)
+                .order_by(BloggerDailyBrief.brief_date.desc())
+                .limit(1)
             )
             r = row.scalar_one_or_none()
-            if r is None:
-                # fallback: latest available
-                row = await s.execute(
-                    select(BloggerDailyBrief)
-                    .where(BloggerDailyBrief.blogger_slug == b.slug)
-                    .order_by(BloggerDailyBrief.brief_date.desc())
-                    .limit(1)
-                )
-                r = row.scalar_one_or_none()
             if r is not None:
                 out.append(r)
     return out
