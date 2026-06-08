@@ -197,7 +197,7 @@
               {% if br.post_count > 0 %}{{ br.post_count }} 篇新帖{% else %}当日无新帖{% endif %}
             </small>
           </header>
-          <div class="brief-body" data-raw="{{ br.brief_md }}">{{ br.brief_md }}</div>
+          <div class="brief-body" data-raw="{{ br.brief_md | replace('__ARCHIVE__', archive_base) }}">{{ br.brief_md | replace('__ARCHIVE__', archive_base) }}</div>
           <footer style="margin-top:0.4rem; display:flex; justify-content:space-between; align-items:center">
             <small class="muted">
               {% if tickers %}

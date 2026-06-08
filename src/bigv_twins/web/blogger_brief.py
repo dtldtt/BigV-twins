@@ -73,7 +73,7 @@ def fetch_blogger_posts_for_day(author_id: int, day_str: str) -> list[dict]:
                 "title": title or "",
                 "text": _strip_html(content)[:3000],
                 "url": url or "",
-                "archive_url": f"https://8-155-174-112.nip.io:8000/content/{db_id}",
+                "archive_url": f"__ARCHIVE__/content/{db_id}",
                 "voteup_count": int(votes or 0),
                 "created_time": ct,
             })
@@ -459,4 +459,5 @@ async def get_latest_briefs() -> list[BloggerDailyBrief]:
             r = row.scalar_one_or_none()
             if r is not None:
                 out.append(r)
+    out.sort(key=lambda br: (br.blogger_slug == "eyu", br.blogger_slug))
     return out

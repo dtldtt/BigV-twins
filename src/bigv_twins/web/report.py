@@ -119,6 +119,12 @@ async def report_index(
         except _json.JSONDecodeError:
             tickers = []
         blogger_brief_pairs.append((b, br, tickers))
+
+    # 根据用户访问方式构建 zhihu 归档站 base URL（同主机 :8000）
+    req_host = request.url.hostname or "8.155.174.112"
+    req_scheme = request.url.scheme or "http"
+    archive_base = f"{req_scheme}://{req_host}:8000"
+
     return templates.TemplateResponse(
         request=request,
         name="report/index.html",
@@ -129,6 +135,7 @@ async def report_index(
             "indices": indices,
             "news": news,
             "blogger_briefs": blogger_brief_pairs,
+            "archive_base": archive_base,
             "max_watchlist": MAX_WATCHLIST,
         },
     )
