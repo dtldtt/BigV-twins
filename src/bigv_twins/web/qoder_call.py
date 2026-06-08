@@ -12,7 +12,7 @@ log = logging.getLogger("bigv_twins.web.qoder_call")
 
 
 async def call_qoder(prompt: str, task_type: str, task_detail: str = "",
-                      model: str = "performance") -> str | None:
+                      model: str = "ultimate") -> str | None:
     """调 Qoder SDK，返回文本结果。自动记录 token usage。"""
     if not settings.qoder_personal_access_token:
         log.warning("qoder %s/%s skipped: no PAT", task_type, task_detail)
