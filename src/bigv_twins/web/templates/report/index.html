@@ -178,13 +178,21 @@
 <section style="margin-bottom:1.5rem">
   <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.4rem">
     <h3 style="margin:0">✍ 博主今日观点</h3>
-    <small class="muted">
-      {% if blogger_briefs %}
-        {{ blogger_briefs[0][1].brief_date }} · 03:30 自动生成
-      {% else %}
-        暂无（明天 03:30 起每天自动生成前一日总结）
-      {% endif %}
-    </small>
+    <div style="display:flex; align-items:center; gap:0.8rem">
+      <small class="muted">
+        {% if blogger_briefs %}
+          {{ blogger_briefs[0][1].brief_date }} · 03:30 自动生成
+        {% else %}
+          暂无（明天 03:30 起每天自动生成前一日总结）
+        {% endif %}
+      </small>
+      <form method="post" action="/report/briefs/regenerate" style="margin:0">
+        <button type="submit" class="secondary outline" style="padding:0.2rem 0.6rem; font-size:0.75rem; margin:0; width:auto"
+          onclick="this.disabled=true; this.textContent='生成中…'">
+          🔁 重新生成
+        </button>
+      </form>
+    </div>
   </div>
 
   {% if blogger_briefs %}

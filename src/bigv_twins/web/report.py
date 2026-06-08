@@ -141,6 +141,28 @@ async def report_index(
     )
 
 
+@router.post("/briefs/regenerate")
+async def briefs_regenerate(
+    request: Request,
+    user: Annotated[User, Depends(auth.require_user)],
+):
+    """手动重新生成博主日报（删旧 + 重跑）。"""
+    from .blogger_brief import generate_briefs_for_day, _yesterday_str
+    from .db import BloggerDailyBrief
+    day_str = request.query_params.get("date") or _yesterday_str()
+    async with db._SessionFactory() as s:
+        await s.execute(
+            BloggerDailyBrief.__table__.delete().where(
+                BloggerDailyBrief.brief_date == day_str
+            )
+        )
+        await s.commit()
+    import asyncio
+    asyncio.create_task(generate_briefs_for_day(day_str))
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse("/report?brief_regenerating=1", status_code=303)
+
+
 @router.post("/watchlist/add")
 async def watchlist_add(
     user: Annotated[User, Depends(auth.require_user)],
