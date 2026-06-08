@@ -1,0 +1,234 @@
+{% extends "base.html" %}
+{% block title %}Token 仪表盘 · 赛博大V{% endblock %}
+
+{% block content %}
+<nav>
+  <ul>
+    <li><strong>管理</strong></li>
+    <li><a href="/admin/cost">仪表盘</a></li>
+    <li><a href="/admin/invites">邀请码</a></li>
+    <li><a href="/admin/users">用户</a></li>
+    <li><a href="/admin/bloggers">博主显示</a></li>
+    <li><a href="/admin/cleanup">清理</a></li>
+    <li><a href="/admin">← 管理首页</a></li>
+  </ul>
+</nav>
+
+<h2>🪙 Token 仪表盘</h2>
+<p class="muted">Qwen（OpenClaw 对话）和 Qoder SDK（博主总结 / 投资回顾）分开统计。</p>
+
+<div style="display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; margin-top:1rem">
+
+  <!-- ============ Qoder SDK ============ -->
+  <article style="border:1px solid #e5e7eb; border-radius:8px; padding:1rem">
+    <header style="margin-bottom:0.8rem">
+      <strong>Qoder SDK</strong>
+      <small class="muted" style="margin-left:0.5rem">performance · 博主日报 / 投资回顾 / 月度复盘</small>
+    </header>
+
+    <div style="display:grid; grid-template-columns:repeat(2,1fr); gap:0.5rem; font-size:0.85rem; margin-bottom:0.8rem">
+      <div><span class="muted">输入</span> <strong>{{ "{:,}".format(qoder_stats.input) }}</strong> tok</div>
+      <div><span class="muted">输出</span> <strong>{{ "{:,}".format(qoder_stats.output) }}</strong> tok</div>
+      <div><span class="muted">调用</span> <strong>{{ qoder_stats.calls }}</strong> 次</div>
+      <div><span class="muted">耗时</span> <strong>{{ qoder_stats.duration_min }}</strong> 分钟</div>
+    </div>
+
+    {% if qoder_stats.by_type %}
+    <div style="font-size:0.82rem; margin-bottom:0.6rem">
+      <div class="muted" style="margin-bottom:0.3rem">按任务类型</div>
+      {% for t in qoder_stats.by_type %}
+      <div style="display:flex; justify-content:space-between; padding:0.15rem 0; border-bottom:1px solid #f3f4f6">
+        <span>{{ t.type }}</span>
+        <span>{{ t.calls }}次 · {{ "{:,}".format(t.tokens) }} tok</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if qoder_stats.daily %}
+    <div style="font-size:0.82rem">
+      <div class="muted" style="margin-bottom:0.3rem">每日趋势（最近 7 天）</div>
+      {% set max_tok = qoder_stats.daily | map(attribute='tokens') | max %}
+      {% for d in qoder_stats.daily %}
+      <div style="display:flex; align-items:center; gap:0.4rem; padding:0.1rem 0">
+        <span style="width:3.5rem; flex-shrink:0">{{ d.day[5:] }}</span>
+        <div style="flex:1; background:#f3f4f6; border-radius:3px; height:14px">
+          <div style="background:#3b82f6; border-radius:3px; height:100%; width:{{ (d.tokens / max_tok * 100) | int if max_tok else 0 }}%"></div>
+        </div>
+        <span style="width:4rem; text-align:right; flex-shrink:0">{{ "{:,}".format(d.tokens // 1000) }}K</span>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if qoder_stats.recent %}
+    <details style="margin-top:0.6rem">
+      <summary style="cursor:pointer; font-size:0.82rem; color:#666">最近调用记录</summary>
+      <table style="width:100%; font-size:0.78rem; margin-top:0.3rem; border-collapse:collapse">
+        <thead><tr style="border-bottom:2px solid #e5e7eb; text-align:left">
+          <th style="padding:0.25rem">时间</th><th>任务</th><th>详情</th><th>输入</th><th>输出</th><th>耗时</th>
+        </tr></thead>
+        <tbody>
+        {% for r in qoder_stats.recent %}
+        <tr style="border-bottom:1px solid #f3f4f6">
+          <td style="padding:0.2rem">{{ r.created_at.strftime("%m-%d %H:%M") if r.created_at else "" }}</td>
+          <td>{{ r.task_type }}</td>
+          <td>{{ r.task_detail or "" }}</td>
+          <td>{{ "{:,}".format(r.input_tokens) }}</td>
+          <td>{{ "{:,}".format(r.output_tokens) }}</td>
+          <td>{{ "%.0f"|format(r.duration_ms / 1000) }}s</td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </details>
+    {% endif %}
+  </article>
+
+  <!-- ============ Qwen / OpenClaw ============ -->
+  <article style="border:1px solid #e5e7eb; border-radius:8px; padding:1rem">
+    <header style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.8rem">
+      <div>
+        <strong>OpenClaw / Qwen</strong>
+        <small class="muted" style="margin-left:0.5rem">对话 · 每小时自动刷新</small>
+      </div>
+      <button id="refresh-btn" class="secondary outline" style="padding:0.2rem 0.6rem; font-size:0.78rem; margin:0; width:auto">🔄 刷新</button>
+    </header>
+
+    <div style="display:grid; grid-template-columns:repeat(3,1fr); gap:0.4rem; margin-bottom:0.8rem">
+      <button type="button" class="model-btn active" data-model="qwen3.6-flash" style="padding:0.4rem; font-size:0.76rem; text-align:center; border:2px solid #2962ff; border-radius:6px; cursor:pointer; background:#2962ff; color:#fff; font-weight:bold">qwen3.6-flash<br><span style="font-size:0.68rem; opacity:0.8">1.2/7.2 元/M</span></button>
+      <button type="button" class="model-btn" data-model="qwen3.6-plus" style="padding:0.4rem; font-size:0.76rem; text-align:center; border:2px solid #e0e3ed; border-radius:6px; cursor:pointer; background:#fff; color:#333; font-weight:bold">qwen3.6-plus<br><span style="font-size:0.68rem; opacity:0.7">2.0/12 元/M</span></button>
+      <button type="button" class="model-btn" data-model="qwen3.7-max" style="padding:0.4rem; font-size:0.76rem; text-align:center; border:2px solid #e0e3ed; border-radius:6px; cursor:pointer; background:#fff; color:#333; font-weight:bold">qwen3.7-max<br><span style="font-size:0.68rem; opacity:0.7">12/36 元/M</span></button>
+    </div>
+    <input type="hidden" id="model-select" value="qwen3.6-flash">
+
+    <div style="display:grid; grid-template-columns:1fr 1fr; gap:0.5rem; margin-bottom:0.8rem">
+      <div style="background:#e8f5e9; border-radius:6px; padding:0.5rem; font-size:0.82rem">
+        <div class="muted">今日</div>
+        <div>调用 <strong id="today-calls">—</strong></div>
+        <div>输入 <strong id="today-input">—</strong> · 输出 <strong id="today-output">—</strong></div>
+        <div style="font-weight:bold; color:#2e7d32"><span id="today-credits">—</span> credits</div>
+      </div>
+      <div style="background:#fff3e0; border-radius:6px; padding:0.5rem; font-size:0.82rem">
+        <div class="muted">本月（<span id="month-range">—</span>）</div>
+        <div>调用 <strong id="month-calls">—</strong></div>
+        <div>输入 <strong id="month-input">—</strong> · 输出 <strong id="month-output">—</strong></div>
+        <div style="font-weight:bold; color:#e65100"><span id="month-credits">—</span> credits</div>
+      </div>
+    </div>
+
+    <div style="border-top:1px solid #eee; padding-top:0.5rem">
+      <div style="display:flex; gap:0.3rem; margin-bottom:0.4rem">
+        <button class="period-btn secondary outline" data-period="intraday" style="padding:0.2rem 0.5rem; font-size:0.76rem; margin:0; width:auto">今日</button>
+        <button class="period-btn secondary outline" data-period="daily" style="padding:0.2rem 0.5rem; font-size:0.76rem; margin:0; width:auto">30天</button>
+        <button class="period-btn secondary outline" data-period="monthly" style="padding:0.2rem 0.5rem; font-size:0.76rem; margin:0; width:auto">6月</button>
+      </div>
+      <div style="position:relative; height:220px">
+        <canvas id="token-chart"></canvas>
+      </div>
+    </div>
+  </article>
+</div>
+
+<!-- Monthly archive -->
+<details style="margin-top:1.5rem">
+  <summary style="cursor:pointer"><strong>📅 Qwen 月度账单归档</strong> <small class="muted">按计费周期归档</small></summary>
+  <div id="monthly-list" style="margin-top:0.6rem"><p class="muted">加载中…</p></div>
+</details>
+
+<script src="/static/vendor/chart.umd.min.js"></script>
+<script>
+(function() {
+  var chart = null, dataCache = null, currentPeriod = "intraday";
+  function fmtInt(n) {
+    if (n >= 1e9) return (n/1e9).toFixed(2)+"B";
+    if (n >= 1e6) return (n/1e6).toFixed(2)+"M";
+    if (n >= 1e3) return (n/1e3).toFixed(1)+"K";
+    return String(n);
+  }
+  function loadData() {
+    var model = document.getElementById("model-select").value;
+    fetch("/admin/api/token-usage?model="+model).then(function(r){return r.json()}).then(function(data){
+      dataCache = data;
+      var t = data.today, m = data.this_month;
+      document.getElementById("today-calls").textContent = t.calls;
+      document.getElementById("today-input").textContent = fmtInt(t.input);
+      document.getElementById("today-output").textContent = fmtInt(t.output);
+      document.getElementById("today-credits").textContent = t.credits.toFixed(1);
+      document.getElementById("month-calls").textContent = m.calls;
+      document.getElementById("month-input").textContent = fmtInt(m.input);
+      document.getElementById("month-output").textContent = fmtInt(m.output);
+      document.getElementById("month-credits").textContent = m.credits.toFixed(1);
+      document.getElementById("month-range").textContent = m.range;
+      renderChart(currentPeriod);
+    });
+  }
+  function renderChart(period) {
+    if (!dataCache) return;
+    var series = dataCache[period];
+    if (chart) chart.destroy();
+    chart = new Chart(document.getElementById("token-chart").getContext("2d"), {
+      type: "line",
+      data: {
+        labels: series.map(function(s){return s.label}),
+        datasets: [
+          {label:"Credits", data:series.map(function(s){return s.credits}), borderColor:"#4caf50", backgroundColor:"rgba(76,175,80,.15)", fill:true, tension:.3, yAxisID:"y", pointRadius:3},
+          {label:"调用", data:series.map(function(s){return s.calls}), borderColor:"#ff9800", borderDash:[5,5], tension:.3, yAxisID:"y1", pointRadius:2}
+        ]
+      },
+      options: {responsive:true, maintainAspectRatio:false, interaction:{mode:"index",intersect:false},
+        scales:{y:{position:"left",title:{display:true,text:"Credits"},beginAtZero:true}, y1:{position:"right",title:{display:true,text:"调用"},beginAtZero:true,grid:{drawOnChartArea:false}}},
+        plugins:{legend:{position:"top"}}
+      }
+    });
+  }
+  document.querySelectorAll(".period-btn").forEach(function(btn) {
+    btn.addEventListener("click", function() {
+      currentPeriod = btn.dataset.period;
+      document.querySelectorAll(".period-btn").forEach(function(b){b.classList.add("outline")});
+      btn.classList.remove("outline");
+      renderChart(currentPeriod);
+    });
+  });
+  var firstPeriodBtn = document.querySelector(".period-btn[data-period=intraday]");
+  if (firstPeriodBtn) firstPeriodBtn.classList.remove("outline");
+  document.querySelectorAll(".model-btn").forEach(function(btn) {
+    btn.addEventListener("click", function() {
+      document.querySelectorAll(".model-btn").forEach(function(b){b.classList.remove("active"); b.style.borderColor="#e0e3ed"; b.style.background="#fff"; b.style.color="#333"});
+      btn.classList.add("active"); btn.style.borderColor="#2962ff"; btn.style.background="#2962ff"; btn.style.color="#fff";
+      document.getElementById("model-select").value = btn.dataset.model;
+      loadData(); if (window.loadMonthlyReports) window.loadMonthlyReports();
+    });
+  });
+  document.getElementById("refresh-btn").addEventListener("click", function() {
+    var b = document.getElementById("refresh-btn"); b.disabled=true; b.textContent="刷新中…";
+    fetch("/admin/api/token-usage/refresh",{method:"POST"}).then(function(){loadData(); b.disabled=false; b.textContent="🔄 刷新"});
+  });
+  loadData();
+})();
+</script>
+<script src="/static/vendor/marked.min.js"></script>
+<script>
+(function() {
+  window.loadMonthlyReports = function() {
+    fetch("/admin/api/monthly-reports").then(function(r){return r.json()}).then(function(reports) {
+      var c = document.getElementById("monthly-list");
+      if (!reports || !reports.length) { c.innerHTML = "<p class='muted'>暂无数据。</p>"; return; }
+      c.innerHTML = "";
+      reports.forEach(function(r, i) {
+        var d = document.createElement("details");
+        if (i === 0) d.open = true;
+        d.style.cssText = "border:1px solid #e0e3ed; border-radius:6px; margin-bottom:0.5rem";
+        var rc = r.recommendation && r.recommendation.recommended ? r.recommendation.recommended.model : "无";
+        d.innerHTML = "<summary style='padding:0.5rem 0.8rem; background:#f8f9fa; cursor:pointer; font-size:0.82rem'><strong>" +
+          r.cycle_start + " ~ " + r.cycle_end + "</strong> · " + r.totals.calls + "次 · " + rc +
+          "</summary><div style='padding:0.6rem 0.8rem; font-size:0.82rem'>" + marked.parse(r.markdown) + "</div>";
+        c.appendChild(d);
+      });
+    });
+  };
+  window.loadMonthlyReports();
+})();
+</script>
+
+{% endblock %}

@@ -60,6 +60,65 @@ async def dashboard(
 
 
 
+@router.get("/cost", response_class=HTMLResponse)
+async def cost_dashboard(
+    request: Request,
+    admin_user: Annotated[User, Depends(auth.require_admin)],
+):
+    """Token 仪表盘 — Qoder + Qwen 分开统计。"""
+    from datetime import date, timedelta
+    from .db import QoderUsageLog
+    from sqlalchemy import func as sqlfunc
+
+    seven_days_ago = (date.today() - timedelta(days=7)).strftime("%Y-%m-%d")
+    qoder_stats = {}
+
+    async with db._SessionFactory() as s:
+        qr = await s.execute(
+            select(
+                sqlfunc.count().label("calls"),
+                sqlfunc.sum(QoderUsageLog.input_tokens).label("input"),
+                sqlfunc.sum(QoderUsageLog.output_tokens).label("output"),
+                sqlfunc.sum(QoderUsageLog.duration_ms).label("duration"),
+            ).where(QoderUsageLog.created_at >= seven_days_ago)
+        )
+        row = qr.one()
+        qoder_stats["calls"] = row.calls or 0
+        qoder_stats["input"] = row.input or 0
+        qoder_stats["output"] = row.output or 0
+        qoder_stats["duration_min"] = round((row.duration or 0) / 60000, 1)
+
+        qr2 = await s.execute(
+            select(
+                QoderUsageLog.task_type,
+                sqlfunc.count().label("calls"),
+                sqlfunc.sum(QoderUsageLog.input_tokens + QoderUsageLog.output_tokens).label("tokens"),
+            ).where(QoderUsageLog.created_at >= seven_days_ago)
+            .group_by(QoderUsageLog.task_type)
+        )
+        qoder_stats["by_type"] = [{"type": r.task_type, "calls": r.calls, "tokens": r.tokens or 0} for r in qr2]
+
+        qr3 = await s.execute(
+            select(
+                sqlfunc.date(QoderUsageLog.created_at).label("day"),
+                sqlfunc.sum(QoderUsageLog.input_tokens + QoderUsageLog.output_tokens).label("tokens"),
+            ).where(QoderUsageLog.created_at >= seven_days_ago)
+            .group_by(sqlfunc.date(QoderUsageLog.created_at))
+            .order_by(sqlfunc.date(QoderUsageLog.created_at))
+        )
+        qoder_stats["daily"] = [{"day": r.day, "tokens": r.tokens or 0} for r in qr3]
+
+        qr4 = await s.execute(
+            select(QoderUsageLog).order_by(QoderUsageLog.created_at.desc()).limit(15)
+        )
+        qoder_stats["recent"] = list(qr4.scalars())
+
+    return templates.TemplateResponse(
+        request=request, name="admin/cost.html",
+        context={"user": admin_user, "qoder_stats": qoder_stats},
+    )
+
+
 @router.get("/api/token-usage")
 async def token_usage_api(
     admin_user: Annotated[User, Depends(auth.require_admin)],
