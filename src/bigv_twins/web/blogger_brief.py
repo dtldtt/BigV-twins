@@ -233,39 +233,9 @@ async def summarize_blogger(blogger_slug: str, blogger_name: str,
 
 
 async def _call_qoder_brief(prompt: str, blogger_slug: str) -> str | None:
-    """走 Qoder SDK performance 跑博主日报总结。失败返回 None。"""
-    if not settings.qoder_personal_access_token:
-        log.warning("brief %s skipped: QODER_PERSONAL_ACCESS_TOKEN not set", blogger_slug)
-        return None
-    try:
-        from qoder_agent_sdk import (
-            AssistantMessage, QoderAgentOptions, access_token, query,
-        )
-    except ImportError as e:
-        log.warning("qoder_agent_sdk import failed: %s", e)
-        return None
-    options = QoderAgentOptions(
-        auth=access_token(settings.qoder_personal_access_token),
-        model="performance",
-    )
-    pieces: list[str] = []
-    try:
-        async for msg in query(prompt=prompt, options=options):
-            if isinstance(msg, AssistantMessage):
-                content = getattr(msg, "content", None)
-                if isinstance(content, list):
-                    for c in content:
-                        if isinstance(c, dict) and c.get("type") == "text":
-                            pieces.append(c.get("text", ""))
-                        elif hasattr(c, "text"):
-                            pieces.append(c.text)
-                elif isinstance(content, str):
-                    pieces.append(content)
-    except Exception as e:
-        log.warning("qoder brief failed for %s: %s", blogger_slug, e)
-        return None
-    text = "".join(pieces).strip()
-    return text or None
+    """走 Qoder SDK performance 跑博主日报总结。"""
+    from .qoder_call import call_qoder
+    return await call_qoder(prompt, "blogger_brief", blogger_slug)
 
 
 def _render_brief_md(result: dict, posts: list[dict] | None = None) -> str:

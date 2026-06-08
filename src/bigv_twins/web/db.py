@@ -485,6 +485,41 @@ class TokenUsageHourly(Base):
     by_model_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now, nullable=False)
 
+class QoderUsageLog(Base):
+    """Qoder SDK 每次调用的 token 用量记录。"""
+    __tablename__ = "qoder_usage_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    task_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    task_detail: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    model: Mapped[str] = mapped_column(String(32), nullable=False)
+    input_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    output_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    cache_read_tokens: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    num_turns: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    duration_ms: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    total_cost_usd: Mapped[float] = mapped_column(Float, default=0, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+
+
+async def log_qoder_usage(task_type: str, task_detail: str, result_msg) -> None:
+    """从 Qoder SDK 的 ResultMessage 提取 usage 写入 DB。"""
+    usage = getattr(result_msg, "usage", {}) or {}
+    async with _SessionFactory() as s:
+        s.add(QoderUsageLog(
+            task_type=task_type,
+            task_detail=task_detail,
+            model=getattr(result_msg, "model", "unknown") or "unknown",
+            input_tokens=usage.get("input_tokens", 0),
+            output_tokens=usage.get("output_tokens", 0),
+            cache_read_tokens=usage.get("cache_read_input_tokens", 0),
+            num_turns=getattr(result_msg, "num_turns", 0) or 0,
+            duration_ms=getattr(result_msg, "duration_ms", 0) or 0,
+            total_cost_usd=getattr(result_msg, "total_cost_usd", 0) or 0,
+        ))
+        await s.commit()
+
+
 async def init_db() -> None:
     """Create tables if missing. Idempotent; called at app startup.
 

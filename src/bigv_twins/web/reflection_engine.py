@@ -416,7 +416,8 @@ async def generate_growth_report(
         prior_reviews_md=prior_reviews_md,
     )
 
-    report_text = await _call_qoder(prompt, user_id, period_type)
+    from .qoder_call import call_qoder as _qoder
+    report_text = await _qoder(prompt, "monthly_review", f"user{user_id}/{period_type}")
     if not report_text:
         return None
 
@@ -450,40 +451,8 @@ async def generate_growth_report(
     return report
 
 
-async def _call_qoder(prompt: str, user_id: int, period_type: str) -> str | None:
-    if not settings.qoder_personal_access_token:
-        log.warning("growth report skipped: QODER token not set")
-        return None
-    try:
-        from qoder_agent_sdk import (
-            AssistantMessage, QoderAgentOptions, access_token, query,
-        )
-    except ImportError as e:
-        log.warning("qoder_agent_sdk import failed: %s", e)
-        return None
-    options = QoderAgentOptions(
-        auth=access_token(settings.qoder_personal_access_token),
-        model="performance",
-    )
-    pieces: list[str] = []
-    try:
-        async for msg in query(prompt=prompt, options=options):
-            if isinstance(msg, AssistantMessage):
-                content = getattr(msg, "content", None)
-                if isinstance(content, list):
-                    for c in content:
-                        if isinstance(c, dict) and c.get("type") == "text":
-                            pieces.append(c.get("text", ""))
-                        elif hasattr(c, "text"):
-                            pieces.append(c.text)
-                elif isinstance(content, str):
-                    pieces.append(content)
-    except Exception as e:
-        log.warning("qoder growth report failed user=%d period=%s: %s",
-                    user_id, period_type, e)
-        return None
-    text = "".join(pieces).strip()
-    return text or None
+
+# _call_qoder removed — now uses shared qoder_call.call_qoder
 
 
 # ============================================================================

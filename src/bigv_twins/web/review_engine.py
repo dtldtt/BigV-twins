@@ -226,44 +226,8 @@ async def generate_review_for_journal(journal: DecisionJournal) -> str | None:
         reasoning_constraint=reasoning_constraint,
     )
 
-    return await _call_qoder(prompt, journal.id)
-
-
-async def _call_qoder(prompt: str, journal_id: int) -> str | None:
-    """走 Qoder SDK performance 模式（推理重的任务比 flash 强很多，不会乱编 PE）。"""
-    if not settings.qoder_personal_access_token:
-        log.warning("review %d skipped: QODER_PERSONAL_ACCESS_TOKEN not set", journal_id)
-        return None
-    try:
-        from qoder_agent_sdk import (
-            AssistantMessage, QoderAgentOptions, access_token, query,
-        )
-    except ImportError as e:
-        log.warning("qoder_agent_sdk import failed: %s", e)
-        return None
-
-    options = QoderAgentOptions(
-        auth=access_token(settings.qoder_personal_access_token),
-        model="performance",
-    )
-    pieces: list[str] = []
-    try:
-        async for msg in query(prompt=prompt, options=options):
-            if isinstance(msg, AssistantMessage):
-                content = getattr(msg, "content", None)
-                if isinstance(content, list):
-                    for c in content:
-                        if isinstance(c, dict) and c.get("type") == "text":
-                            pieces.append(c.get("text", ""))
-                        elif hasattr(c, "text"):
-                            pieces.append(c.text)
-                elif isinstance(content, str):
-                    pieces.append(content)
-    except Exception as e:
-        log.warning("qoder review failed for journal %d: %s", journal_id, e)
-        return None
-    text = "".join(pieces).strip()
-    return text or None
+    from .qoder_call import call_qoder as _qoder
+    return await _qoder(prompt, "single_trade_review", str(journal.id))
 
 
 # Review interval: 7→30→90→180 days
@@ -714,7 +678,8 @@ async def generate_review_for_ticker(user_id: int, ticker: str) -> str | None:
         self_critique_instruction=self_critique_instruction,
     )
 
-    return await _call_qoder(prompt, hash(ticker))
+    from .qoder_call import call_qoder as _qoder
+    return await _qoder(prompt, "ticker_review", ticker)
 
 
 async def save_ticker_review(user_id: int, ticker: str, report_md: str) -> "DecisionReview":

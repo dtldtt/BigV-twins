@@ -125,6 +125,72 @@ async def report_index(
     req_scheme = request.url.scheme or "http"
     archive_base = f"{req_scheme}://{req_host}:8000"
 
+    # Qoder usage stats (last 7 days)
+    from .db import QoderUsageLog, TokenUsageHourly
+    from sqlalchemy import func
+    seven_days_ago = (date.today() - timedelta(days=7)).strftime("%Y-%m-%d")
+    qoder_stats = {}
+    qwen_stats = {}
+    async with db._SessionFactory() as usage_s:
+        # Qoder: totals
+        qr = await usage_s.execute(
+            select(
+                func.count().label("calls"),
+                func.sum(QoderUsageLog.input_tokens).label("input"),
+                func.sum(QoderUsageLog.output_tokens).label("output"),
+                func.sum(QoderUsageLog.duration_ms).label("duration"),
+            ).where(QoderUsageLog.created_at >= seven_days_ago)
+        )
+        row = qr.one()
+        qoder_stats["calls"] = row.calls or 0
+        qoder_stats["input"] = row.input or 0
+        qoder_stats["output"] = row.output or 0
+        qoder_stats["duration_min"] = round((row.duration or 0) / 60000, 1)
+
+        # Qoder: by task_type
+        qr2 = await usage_s.execute(
+            select(
+                QoderUsageLog.task_type,
+                func.count().label("calls"),
+                func.sum(QoderUsageLog.input_tokens + QoderUsageLog.output_tokens).label("tokens"),
+            ).where(QoderUsageLog.created_at >= seven_days_ago)
+            .group_by(QoderUsageLog.task_type)
+        )
+        qoder_stats["by_type"] = [{"type": r.task_type, "calls": r.calls, "tokens": r.tokens or 0} for r in qr2]
+
+        # Qoder: daily trend
+        qr3 = await usage_s.execute(
+            select(
+                func.date(QoderUsageLog.created_at).label("day"),
+                func.sum(QoderUsageLog.input_tokens + QoderUsageLog.output_tokens).label("tokens"),
+            ).where(QoderUsageLog.created_at >= seven_days_ago)
+            .group_by(func.date(QoderUsageLog.created_at))
+            .order_by(func.date(QoderUsageLog.created_at))
+        )
+        qoder_stats["daily"] = [{"day": r.day, "tokens": r.tokens or 0} for r in qr3]
+
+        # Qoder: recent calls
+        qr4 = await usage_s.execute(
+            select(QoderUsageLog)
+            .order_by(QoderUsageLog.created_at.desc())
+            .limit(10)
+        )
+        qoder_stats["recent"] = list(qr4.scalars())
+
+        # Qwen (existing TokenUsageHourly): last 7 days
+        seven_days_hour = seven_days_ago + "T00"
+        qw = await usage_s.execute(
+            select(
+                func.sum(TokenUsageHourly.total_calls).label("calls"),
+                func.sum(TokenUsageHourly.total_input).label("input"),
+                func.sum(TokenUsageHourly.total_output).label("output"),
+            ).where(TokenUsageHourly.hour >= seven_days_hour)
+        )
+        wr = qw.one()
+        qwen_stats["calls"] = wr.calls or 0
+        qwen_stats["input"] = wr.input or 0
+        qwen_stats["output"] = wr.output or 0
+
     return templates.TemplateResponse(
         request=request,
         name="report/index.html",
@@ -137,6 +203,8 @@ async def report_index(
             "blogger_briefs": blogger_brief_pairs,
             "archive_base": archive_base,
             "max_watchlist": MAX_WATCHLIST,
+            "qoder_stats": qoder_stats,
+            "qwen_stats": qwen_stats,
         },
     )
 
