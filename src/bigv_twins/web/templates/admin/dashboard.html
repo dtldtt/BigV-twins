@@ -1,10 +1,69 @@
 {% extends "base.html" %}
+{% block title %}管理 · 赛博大V<!-- Token usage panel ============================================== -->
+<article id="token-panel" style="margin-top:1.5rem">
+  <header>
+    <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:0.5rem">
+      <div>
+        <strong>🪙 Token 用量监控</strong>
+        <small class="muted" style="margin-left:0.6rem">每小时自动刷新 · 数据源 OpenClaw session 日志</small>
+      </div>
+      <button id="refresh-btn" class="secondary outline" style="padding:0.3rem 0.7rem; font-size:0.8rem; margin:0; width:auto">🔄 手动刷新</button>
+    </div>
 
-<article style="margin-top:1.5rem; text-align:center; padding:1.5rem">
-  <h3 style="margin:0 0 0.5rem">🪙 Token 用量监控</h3>
-  <p class="muted">Qwen / Qoder SDK 用量统计、趋势图表、月度账单</p>
-  <a href="/admin/cost" role="button" style="margin-top:0.5rem">打开仪表盘 →</a>
+    <div class="model-selector">
+      <label class="model-selector-label">💰 价格模型</label>
+      <div class="model-btn-group">
+        <button type="button" class="model-btn active" data-model="qwen3.6-flash">
+          <span class="model-name">qwen3.6-flash</span>
+          <span class="model-tier">经济档</span>
+          <span class="model-price">1.2 / 7.2 元/M</span>
+        </button>
+        <button type="button" class="model-btn" data-model="qwen3.6-plus">
+          <span class="model-name">qwen3.6-plus</span>
+          <span class="model-tier">均衡档</span>
+          <span class="model-price">2.0 / 12 元/M</span>
+        </button>
+        <button type="button" class="model-btn" data-model="qwen3.7-max">
+          <span class="model-name">qwen3.7-max</span>
+          <span class="model-tier">旗舰档</span>
+          <span class="model-price">12 / 36 元/M（原价）</span>
+        </button>
+      </div>
+    </div>
+    <input type="hidden" id="model-select" value="qwen3.6-flash">
+  </header>
+
+  <!-- Headline cards -->
+  <div class="grid" style="margin-top:0.8rem">
+    <article style="background:#e8f5e9; border-left:3px solid #4caf50">
+      <header style="font-size:0.85rem; color:#2e7d32">今日</header>
+      <div style="font-size:0.78rem; color:#666">调用 <strong id="today-calls">—</strong> 次</div>
+      <div style="font-size:0.78rem; color:#666">输入 <strong id="today-input">—</strong> · 输出 <strong id="today-output">—</strong></div>
+      <h3 style="margin:0.3rem 0 0; color:#2e7d32"><span id="today-credits">—</span> credits</h3>
+    </article>
+
+    <article style="background:#fff3e0; border-left:3px solid #ff9800">
+      <header style="font-size:0.85rem; color:#e65100">本月（<span id="month-range">—</span>）</header>
+      <div style="font-size:0.78rem; color:#666">调用 <strong id="month-calls">—</strong> 次</div>
+      <div style="font-size:0.78rem; color:#666">输入 <strong id="month-input">—</strong> · 输出 <strong id="month-output">—</strong></div>
+      <h3 style="margin:0.3rem 0 0; color:#e65100"><span id="month-credits">—</span> credits</h3>
+    </article>
+  </div>
+
+  <!-- Chart -->
+  <div style="margin-top:1.2rem; border-top:1px solid #eee; padding-top:0.8rem">
+    <div style="display:flex; gap:0.4rem; margin-bottom:0.6rem">
+      <button class="period-btn" data-period="intraday">今日 24h</button>
+      <button class="period-btn" data-period="daily">近 30 天</button>
+      <button class="period-btn" data-period="monthly">近 6 月</button>
+    </div>
+    <div style="position:relative; height:280px">
+      <canvas id="token-chart"></canvas>
+    </div>
+  </div>
 </article>
+
+<script src="/static/vendor/chart.umd.min.js"></script>
 <script>
 (function() {
   let chart = null;
@@ -322,5 +381,50 @@
   loadMonthlyReports();
 })();
 </script>
+
+{% endblock %}
+
+{% block content %}
+<nav>
+  <ul>
+    <li><strong>管理</strong></li>
+    <li><a href="/admin/cost">仪表盘</a></li>
+    <li><a href="/admin/invites">邀请码</a></li>
+    <li><a href="/admin/users">用户</a></li>
+    <li><a href="/admin/bloggers">博主显示</a></li>
+    <li><a href="/admin/cleanup">清理</a></li>
+  </ul>
+</nav>
+
+<h2>仪表盘</h2>
+<div class="grid">
+  <article><header>用户</header><h3>{{ counts.users }}</h3></article>
+  <article><header>对话</header><h3>{{ counts.conversations }}</h3></article>
+  <article><header>消息</header><h3>{{ counts.messages }}</h3></article>
+  <article><header>近 7 天消息</header><h3>{{ msgs_7d }}</h3></article>
+</div>
+
+<div class="grid">
+  <article>
+    <header>博主可见性</header>
+    <p>共 <strong>{{ blogger_total }}</strong> 位，已隐藏 <strong>{{ hidden_count }}</strong> 位</p>
+    <a href="/admin/bloggers" role="button" class="outline">管理</a>
+  </article>
+  <article>
+    <header>邀请码</header>
+    {% if active_invite %}
+    <p style="font-family:monospace;font-size:0.85rem;word-break:break-all">{{ active_invite.code[:20] }}…</p>
+    {% endif %}
+    <a href="/admin/invites" role="button" class="outline">查看 / 轮换</a>
+  </article>
+</div>
+
+
+
+<article style="margin-top:1.5rem; text-align:center; padding:1.5rem">
+  <h3 style="margin:0 0 0.5rem">🪙 Token 用量监控</h3>
+  <p class="muted">Qwen / Qoder SDK 用量统计、趋势图表、月度账单</p>
+  <a href="/admin/cost" role="button" style="margin-top:0.5rem">打开仪表盘 →</a>
+</article>
 
 {% endblock %}
