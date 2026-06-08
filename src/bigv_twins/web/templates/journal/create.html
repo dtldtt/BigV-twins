@@ -48,8 +48,12 @@
         </select>
       </label>
       <label>
-        决策时间 <small class="muted">（补录可改成历史日期）</small>
+        <span id="date-label">决策时间</span> <small class="muted">（补录可改成历史日期；分红时填除权除息日）</small>
         <input type="date" name="decision_at" id="decision-at" value="{{ now_iso }}">
+      </label>
+      <label id="record-date-row" style="display:none">
+        股权登记日 <small class="muted">（在此日期收盘前持有的股数参与分红，系统自动计算）</small>
+        <input type="date" name="record_date" id="record-date">
       </label>
     </div>
     <div class="form-row">
@@ -132,14 +136,24 @@ document.querySelector('.journal-form').addEventListener('submit', function(e) {
 const sel = document.getElementById('action-select');
 const priceLabel = document.getElementById('price-label');
 const sharesLabel = document.getElementById('shares-label');
+const recordDateRow = document.getElementById('record-date-row');
+const dateLabel = document.getElementById('date-label');
 sel.addEventListener('change', function() {
+  const isDividend = this.value === 'dividend';
+  recordDateRow.style.display = isDividend ? '' : 'none';
   switch(this.value) {
     case 'open': case 'add':
-      priceLabel.textContent = '买入价格'; sharesLabel.textContent = '操作数量（股）'; break;
+      priceLabel.textContent = '买入价格'; sharesLabel.textContent = '操作数量（股）';
+      dateLabel.textContent = '决策时间'; break;
     case 'reduce': case 'close':
-      priceLabel.textContent = '卖出价格'; sharesLabel.textContent = '操作数量（股）'; break;
+      priceLabel.textContent = '卖出价格'; sharesLabel.textContent = '操作数量（股）';
+      dateLabel.textContent = '决策时间'; break;
+    case 'dividend':
+      priceLabel.textContent = '每股分红（元）'; sharesLabel.textContent = '持股数（自动计算，可不填）';
+      dateLabel.textContent = '除权除息日'; break;
     case 'retroactive':
-      priceLabel.textContent = '当前持仓成本价'; sharesLabel.textContent = '持有数量（股）'; break;
+      priceLabel.textContent = '当前持仓成本价'; sharesLabel.textContent = '持有数量（股）';
+      dateLabel.textContent = '决策时间'; break;
   }
 });
 </script>

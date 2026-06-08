@@ -193,6 +193,7 @@ async def stock_page(
             "stop_loss_price": j.stop_loss_price,
             "critique_entries": critique_entries,
             "is_future": is_future,
+            "record_date": getattr(j, "record_date", None),
         })
 
     # Fetch ROE asynchronously (only A-share stocks, not ETF, not HK)

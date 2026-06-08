@@ -378,6 +378,7 @@ class DecisionJournal(Base):
     review_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     # 用户事后自评（多次追加，自动按 "[M月D日 追加评价] ..." 拼接）
     self_critique: Mapped[str | None] = mapped_column(Text, nullable=True)
+    record_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
 
     user: Mapped[User] = relationship()
 

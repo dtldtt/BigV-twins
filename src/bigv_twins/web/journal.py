@@ -599,6 +599,37 @@ async def journal_create_form(
     )
 
 
+async def _calc_shares_at_date(
+    session: AsyncSession, user_id: int, ticker: str, ref_date_str: str,
+) -> int:
+    """计算用户在 ref_date（股权登记日）当日收盘时的持股数。
+    遍历该 ticker 所有 open/add/sell/reduce/close 操作，累加到 ref_date。
+    """
+    from datetime import datetime as _dt
+    try:
+        ref_dt = _dt.strptime(ref_date_str, "%Y-%m-%d")
+    except ValueError:
+        return 0
+    rows = await session.execute(
+        select(DecisionJournal).where(
+            DecisionJournal.user_id == user_id,
+            DecisionJournal.ticker == ticker,
+            DecisionJournal.action.in_(["open", "buy", "add", "sell", "reduce", "close"]),
+            DecisionJournal.created_at <= ref_dt.replace(hour=23, minute=59, second=59),
+        ).order_by(DecisionJournal.created_at)
+    )
+    total = 0
+    for j in rows.scalars():
+        s = j.shares or 0
+        if j.action in ("open", "buy", "add"):
+            total += s
+        elif j.action in ("sell", "reduce"):
+            total -= s
+        elif j.action == "close":
+            total = 0
+    return max(total, 0)
+
+
 @router.post("/new")
 async def journal_create(
     request: Request,
@@ -617,6 +648,7 @@ async def journal_create(
     expected_hold_period: str = Form(""),
     if_drop_10pct: str = Form(""),
     decision_at: str = Form(""),
+    record_date: str = Form(""),
     market_hint: str = Form("a-share"),  # a-share / hk — 决定按名字搜索时去哪个名单
 ):
     # Resolve ticker: ALWAYS normalize to code. ticker_name only stores the name.
@@ -651,6 +683,15 @@ async def journal_create(
         except ValueError:
             pass
 
+    # 分红：自动根据股权登记日计算实际持股数
+    parsed_record_date = record_date.strip() if record_date else None
+    if action == "dividend" and raw_ticker:
+        ref_date = parsed_record_date or (decision_at.strip() if decision_at else None)
+        if ref_date:
+            calc_shares = await _calc_shares_at_date(session, user.id, raw_ticker, ref_date)
+            if calc_shares > 0:
+                shares = calc_shares
+
     journal = DecisionJournal(
         user_id=user.id,
         ticker=raw_ticker,
@@ -668,6 +709,7 @@ async def journal_create(
         expected_hold_period=expected_hold_period or None,
         if_drop_10pct=if_drop_10pct or None,
         status="active",
+        record_date=parsed_record_date,
         **({"created_at": created_at} if created_at else {}),
     )
     session.add(journal)
