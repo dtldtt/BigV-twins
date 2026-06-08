@@ -43,20 +43,25 @@ def _fetch_a_share_dividends(ticker: str) -> list[dict]:
         per_10 = row.get("派息")
         if not per_10 or pd.isna(per_10) or per_10 == 0:
             continue
+        rec = row.get("股权登记日")
+        rec_str = str(rec)[:10] if rec is not None and not pd.isna(rec) else ""
         try:
-            out.append({"ex_date": str(ex)[:10], "per_10": float(per_10)})
+            out.append({"ex_date": str(ex)[:10], "per_10": float(per_10),
+                        "record_date": rec_str})
         except (ValueError, TypeError):
             continue
     return out
 
 
-async def _shares_held_on(user_id: int, ticker: str, ex_date_str: str) -> int:
-    """重建 user 在 ex_date 这一天对该 ticker 的持仓股数。
+async def _shares_held_on(user_id: int, ticker: str, ex_date_str: str,
+                          record_date_str: str = "") -> int:
+    """重建 user 在股权登记日收盘时对该 ticker 的持仓股数。
 
-    取截至 ex_date 当日（含）的所有 journal 操作，按时间顺序累计。
-    cycle 边界：close 重置归零。
+    优先用 record_date（股权登记日），没有则回退到 ex_date（除权除息日）。
+    取截至该日当日（含）的所有 journal 操作，按时间顺序累计。
     """
-    cutoff = datetime.fromisoformat(ex_date_str)
+    ref = record_date_str or ex_date_str
+    cutoff = datetime.fromisoformat(ref)
     async with db._SessionFactory() as s:
         rows = await s.execute(
             select(DecisionJournal).where(
@@ -117,7 +122,9 @@ async def sync_user_dividends(user_id: int) -> dict:
         for d in divs:
             ex_date = d["ex_date"]
             per_10 = d["per_10"]
-            shares = await _shares_held_on(user_id, ticker, ex_date)
+            record_date = d.get("record_date", "")
+            shares = await _shares_held_on(user_id, ticker, ex_date,
+                                            record_date_str=record_date)
             if shares <= 0:
                 continue
 
@@ -151,6 +158,7 @@ async def sync_user_dividends(user_id: int) -> dict:
                 )
 
                 # 新建 dividend 记录
+                rec_note = f"，登记日 {record_date}" if record_date else ""
                 entry = DecisionJournal(
                     user_id=user_id,
                     ticker=ticker,
@@ -158,7 +166,8 @@ async def sync_user_dividends(user_id: int) -> dict:
                     action="dividend",
                     price_at_decision=div_per_share,
                     shares=shares,
-                    reasoning=f"A 股现金分红：每 10 股派 ¥{per_10:.2f}（除权日 {ex_date}），持仓 {shares} 股共得 ¥{total_div:.2f}（毛额，未扣税）",
+                    record_date=record_date or None,
+                    reasoning=f"A 股现金分红：每 10 股派 ¥{per_10:.2f}（除权日 {ex_date}{rec_note}），持仓 {shares} 股共得 ¥{total_div:.2f}（毛额，未扣税）",
                     status="active",
                     created_at=ex_dt,
                 )

@@ -489,9 +489,10 @@ async def journal_list(
             p = portfolio_by_ticker.get(ticker)
             card.update({
                 "current_shares": p["shares"] if p else 0,
-                "cost_basis": p["cost_basis"] if p else None,           # 已实现盈亏调整后的剩余成本
-                "avg_buy_price": p["avg_buy_price"] if p else None,    # 纯买入均价（不受卖出影响）
+                "cost_basis": p["cost_basis"] if p else None,
+                "avg_buy_price": p["avg_buy_price"] if p else None,
                 "current_price": price_map.get(ticker),
+                "daily_chg": (quote_map.get(ticker) or {}).get("change_pct"),
                 "market_value": p["market_value"] if p else 0,
                 "unrealized_pnl": p["pnl"] if p else None,
                 "unrealized_pct": p["pnl_pct"] if p else None,
