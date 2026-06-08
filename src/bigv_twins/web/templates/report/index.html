@@ -465,6 +465,7 @@ document.querySelectorAll(".brief-body[data-raw], .watch-summary[data-raw]").for
   const raw = el.getAttribute("data-raw");
   const html = DOMPurify.sanitize(marked.parse(raw || ""));
   el.innerHTML = html;
+  el.querySelectorAll('a[href]').forEach(a => { a.target = '_blank'; a.rel = 'noopener'; });
 });
 
 function toggleBrief(btn) {
