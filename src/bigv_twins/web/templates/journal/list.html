@@ -102,6 +102,9 @@
           <span class="tc-currency tc-currency-{{ c.currency|lower }}">
             {% if c.currency == 'HKD' %}港股{% elif c.currency == 'USD' %}美股{% else %}A股{% endif %}
           </span>
+          {% if c.get('daily_chg') is not none %}
+          <span class="tc-daily-chg {% if c.get('daily_chg', 0) > 0 %}up{% elif c.get('daily_chg', 0) < 0 %}down{% endif %}">今日 {{ "%+.2f%%"|format(c.get('daily_chg', 0)) }}</span>
+          {% endif %}
           <a href="/stock/{{ c.ticker }}" class="tc-detail-btn" onclick="event.stopPropagation()">📊 详情</a>
         </div>
         <div class="tc-summary-row">
@@ -109,7 +112,7 @@
             <span class="tc-stat">持仓 <strong>{{ c.current_shares }}</strong> 股</span>
             {% if c.cost_basis is not none %}<span class="tc-stat">成本 {{ c.currency_symbol }}{{ "%.2f"|format(c.cost_basis) }}</span>{% endif %}
             {% if c.avg_buy_price is not none %}<span class="tc-stat">买入均价 {{ c.currency_symbol }}{{ "%.2f"|format(c.avg_buy_price) }}</span>{% endif %}
-            {% if c.current_price %}<span class="tc-stat">现价 {{ c.currency_symbol }}{{ "%.2f"|format(c.current_price) }}{% if c.get('daily_chg') is not none %} <span class="{% if c.get('daily_chg', 0) > 0 %}up{% elif c.get('daily_chg', 0) < 0 %}down{% endif %}">{{ "%+.2f%%"|format(c.get('daily_chg', 0)) }}</span>{% endif %}</span>{% endif %}
+            {% if c.current_price %}<span class="tc-stat">现价 {{ c.currency_symbol }}{{ "%.2f"|format(c.current_price) }}</span>{% endif %}
             {% if c.market_value %}<span class="tc-stat">市值 {{ c.currency_symbol }}{{ "%.0f"|format(c.market_value) }}</span>{% endif %}
             {% if c.unrealized_pnl is not none %}
               <span class="tc-stat tc-pnl {% if c.unrealized_pnl > 0 %}up{% elif c.unrealized_pnl < 0 %}down{% endif %}">
@@ -437,6 +440,11 @@ function toggleNoteEdit(btnOrItem, nid, cancel) {
 .tc-stat strong { font-weight:600; }
 .tc-stat.muted { color:#888; }
 .tc-pnl { font-weight:600; }
+.tc-stat.tc-pnl.up { color:#e53935; }
+.tc-stat.tc-pnl.down { color:#43a047; }
+.tc-daily-chg { font-size:0.82rem; font-weight:600; margin-left:0.3rem; }
+.tc-daily-chg.up { color:#e53935; }
+.tc-daily-chg.down { color:#43a047; }
 
 .tc-trades { display:flex; flex-direction:column; gap:0.4rem; }
 .tc-trade { font-size:0.83rem; }
