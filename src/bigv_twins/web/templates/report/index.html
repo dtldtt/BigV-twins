@@ -54,7 +54,7 @@
   {% if watchlist_quotes %}
     <div class="watch-list">
       {% for q in watchlist_quotes %}
-        <article class="watch-card watch-verdict-{{ q.verdict or '中性' }}">
+        <article class="watch-card">
           <header class="watch-head">
             <div class="watch-name">
               <strong>{{ q.name }}</strong>
@@ -87,14 +87,8 @@
           </div>
           {% endif %}
 
-          {% if q.summary_md or q.mentions or q.verdict %}
+          {% if q.summary_md or q.mentions %}
             <div class="watch-brief">
-              {% if q.verdict %}
-                <span class="watch-tag watch-tag-{{ q.verdict }}">
-                  {% if q.verdict == "利好" %}🟢 {{ q.verdict }}{% elif q.verdict == "利空" %}🔴 {{ q.verdict }}{% else %}⚪ {{ q.verdict }}{% endif %}
-                </span>
-                {% if q.verdict_reason %}<small class="muted">· {{ q.verdict_reason }}</small>{% endif %}
-              {% endif %}
               {% if q.summary_md %}
                 <div class="watch-summary" data-raw="{{ q.summary_md }}">{{ q.summary_md }}</div>
               {% endif %}

@@ -100,7 +100,7 @@ async def lifespan(app: FastAPI):
     scheduler = AsyncIOScheduler(timezone="Asia/Shanghai")
     # Refresh jin10 news every 4 hours; also kick off once at startup so a
     # freshly-restarted server isn't empty
-    scheduler.add_job(_refresh_jin10_and_index, IntervalTrigger(hours=4), id="jin10_news",
+    scheduler.add_job(_refresh_jin10_and_index, IntervalTrigger(hours=2), id="jin10_news",
                       misfire_grace_time=600, replace_existing=True)
     scheduler.add_job(_refresh_jin10_and_index, "date", id="jin10_news_initial",
                       replace_existing=True)
