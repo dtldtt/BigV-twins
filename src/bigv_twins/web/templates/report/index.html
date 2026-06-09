@@ -179,16 +179,11 @@
   <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.4rem; flex-wrap:wrap; gap:0.5rem">
     <h3 style="margin:0">✍ 每日博主观点汇总</h3>
     <div style="display:flex; align-items:center; gap:0.5rem; flex-shrink:0">
-      <small class="muted">
+      <small class="muted" id="digest-info">
         {% if digest %}{{ digest.digest_date }} · {{ digest.blogger_count }} 位博主{% else %}暂无{% endif %}
       </small>
-      <select id="digest-date-picker" onchange="if(this.value) window.location.href='/report?digest_date='+this.value"
-        style="padding:0.25rem 0.4rem; font-size:0.78rem; border:1px solid #d1d5db; border-radius:4px; min-width:7rem">
-        <option value="">选择日期</option>
-        {% for dd in digest_dates %}
-        <option value="{{ dd }}" {% if digest and digest.digest_date == dd %}selected{% endif %}>{{ dd }}</option>
-        {% endfor %}
-      </select>
+      <input type="date" id="digest-date-picker" value="{{ digest.digest_date if digest else '' }}"
+        style="padding:0.25rem 0.4rem; font-size:0.78rem; border:1px solid #d1d5db; border-radius:4px; width:9rem; cursor:pointer">
       <form method="post" action="/report/digest/regenerate" style="margin:0">
         <button type="submit" class="secondary outline" style="padding:0.3rem 1rem; font-size:0.78rem; margin:0; width:auto; white-space:nowrap"
           onclick="this.disabled=true; this.textContent='生成中…约90s'">
@@ -497,6 +492,28 @@ function toggleBrief(btn) {
     btn.textContent = '展开全部 ▼';
   }
 }
+
+// 日期选择器 AJAX 局部刷新 digest
+document.getElementById('digest-date-picker').addEventListener('change', function() {
+  var dt = this.value;
+  if (!dt) return;
+  var digestBody = document.querySelector('.digest-body');
+  var infoEl = document.querySelector('#digest-info');
+  if (digestBody) digestBody.innerHTML = '<p class="muted">加载中…</p>';
+  fetch('/report/api/digest?date=' + dt).then(function(r){return r.json()}).then(function(data) {
+    if (data.status === 'ok' && digestBody) {
+      if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
+        digestBody.innerHTML = DOMPurify.sanitize(marked.parse(data.digest_md || ''));
+      } else {
+        digestBody.textContent = data.digest_md || '';
+      }
+      digestBody.querySelectorAll('a[href]').forEach(function(a){a.target='_blank'; a.rel='noopener'});
+      if (infoEl) infoEl.textContent = data.date + ' · ' + data.blogger_count + ' 位博主';
+    } else if (digestBody) {
+      digestBody.innerHTML = '<p class="muted">该日期无 digest 数据</p>';
+    }
+  });
+});
 
 // 内容不够长的卡片自动隐藏展开按钮
 document.querySelectorAll('.brief-card').forEach(card => {

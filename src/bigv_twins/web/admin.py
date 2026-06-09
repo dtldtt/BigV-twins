@@ -163,6 +163,69 @@ async def token_usage_api(
     return await get_dashboard_stats(model=model)
 
 
+@router.get("/api/qoder-usage")
+async def qoder_usage_api(
+    admin_user: Annotated[User, Depends(auth.require_admin)],
+    model: str = "all",
+):
+    """Qoder SDK usage stats for charts — intraday/daily/monthly series."""
+    from .db import QoderUsageLog
+    from sqlalchemy import func as sqlfunc
+    from datetime import date, timedelta
+
+    today_str = date.today().strftime("%Y-%m-%d")
+    thirty_ago = (date.today() - timedelta(days=30)).strftime("%Y-%m-%d")
+
+    base = select(QoderUsageLog)
+    if model != "all":
+        base = base.where(QoderUsageLog.model == model)
+
+    async with db._SessionFactory() as s:
+        # Today
+        tr = await s.execute(
+            select(
+                sqlfunc.count().label("calls"),
+                sqlfunc.sum(QoderUsageLog.input_tokens).label("input"),
+                sqlfunc.sum(QoderUsageLog.output_tokens).label("output"),
+            ).where(sqlfunc.date(QoderUsageLog.created_at) == today_str)
+            .where(QoderUsageLog.model == model if model != "all" else True)
+        )
+        t = tr.one()
+        today = {"calls": t.calls or 0, "input": t.input or 0, "output": t.output or 0,
+                 "tokens": (t.input or 0) + (t.output or 0)}
+
+        # Daily (30 days)
+        dr = await s.execute(
+            select(
+                sqlfunc.date(QoderUsageLog.created_at).label("day"),
+                sqlfunc.count().label("calls"),
+                sqlfunc.sum(QoderUsageLog.input_tokens).label("input"),
+                sqlfunc.sum(QoderUsageLog.output_tokens).label("output"),
+            ).where(QoderUsageLog.created_at >= thirty_ago)
+            .where(QoderUsageLog.model == model if model != "all" else True)
+            .group_by(sqlfunc.date(QoderUsageLog.created_at))
+            .order_by(sqlfunc.date(QoderUsageLog.created_at))
+        )
+        daily = [{"label": r.day[5:], "calls": r.calls, "input": r.input or 0,
+                  "output": r.output or 0, "tokens": (r.input or 0) + (r.output or 0)} for r in dr]
+
+        # Monthly (6 months)
+        mr = await s.execute(
+            select(
+                sqlfunc.strftime("%Y-%m", QoderUsageLog.created_at).label("month"),
+                sqlfunc.count().label("calls"),
+                sqlfunc.sum(QoderUsageLog.input_tokens).label("input"),
+                sqlfunc.sum(QoderUsageLog.output_tokens).label("output"),
+            ).where(QoderUsageLog.model == model if model != "all" else True)
+            .group_by(sqlfunc.strftime("%Y-%m", QoderUsageLog.created_at))
+            .order_by(sqlfunc.strftime("%Y-%m", QoderUsageLog.created_at))
+        )
+        monthly = [{"label": r.month, "calls": r.calls, "input": r.input or 0,
+                    "output": r.output or 0, "tokens": (r.input or 0) + (r.output or 0)} for r in mr]
+
+    return {"today": today, "daily": daily, "monthly": monthly}
+
+
 @router.post("/api/token-usage/refresh")
 async def token_usage_refresh_now(
     admin_user: Annotated[User, Depends(auth.require_admin)],

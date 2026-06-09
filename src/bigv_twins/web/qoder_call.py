@@ -52,7 +52,7 @@ async def call_qoder(prompt: str, task_type: str, task_detail: str = "",
     if result_msg:
         try:
             from . import db
-            await db.log_qoder_usage(task_type, task_detail, result_msg)
+            await db.log_qoder_usage(task_type, task_detail, result_msg, model=model)
         except Exception:
             log.warning("failed to log qoder usage for %s/%s", task_type, task_detail)
 

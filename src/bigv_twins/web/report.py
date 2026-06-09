@@ -182,6 +182,29 @@ async def briefs_regenerate(
     return RedirectResponse("/report?brief_regenerating=1", status_code=303)
 
 
+@router.get("/api/digest")
+async def digest_api(
+    request: Request,
+    user: Annotated[User, Depends(auth.require_user)],
+    date: str = "",
+):
+    """AJAX: 返回指定日期的 digest_md。"""
+    if not date:
+        d = await get_latest_digest()
+    else:
+        d = await get_digest_for_date(date)
+    if not d:
+        return {"status": "not_found", "date": date}
+    req_host = request.url.hostname or "8.155.174.112"
+    req_scheme = request.url.scheme or "http"
+    ab = f"{req_scheme}://{req_host}:8000"
+    return {
+        "status": "ok", "date": d.digest_date,
+        "blogger_count": d.blogger_count,
+        "digest_md": (d.digest_md or "").replace("__ARCHIVE__", ab),
+    }
+
+
 @router.post("/digest/regenerate")
 async def digest_regenerate(
     request: Request,

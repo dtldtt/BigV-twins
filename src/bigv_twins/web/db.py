@@ -516,14 +516,20 @@ class QoderUsageLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
 
 
-async def log_qoder_usage(task_type: str, task_detail: str, result_msg) -> None:
+async def log_qoder_usage(task_type: str, task_detail: str, result_msg,
+                          model: str = "unknown") -> None:
     """从 Qoder SDK 的 ResultMessage 提取 usage 写入 DB。"""
     usage = getattr(result_msg, "usage", {}) or {}
+    # model 优先用调用方传入的，回退到 model_usage 的 key
+    if model == "unknown":
+        mu = getattr(result_msg, "model_usage", {}) or {}
+        if mu:
+            model = next(iter(mu.keys()), "unknown")
     async with _SessionFactory() as s:
         s.add(QoderUsageLog(
             task_type=task_type,
             task_detail=task_detail,
-            model=getattr(result_msg, "model", "unknown") or "unknown",
+            model=model,
             input_tokens=usage.get("input_tokens", 0),
             output_tokens=usage.get("output_tokens", 0),
             cache_read_tokens=usage.get("cache_read_input_tokens", 0),
