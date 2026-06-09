@@ -499,6 +499,46 @@ class DailyDigest(Base):
     generated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
 
 
+class PredictionLog(Base):
+    """从 digest 观察清单提取的可验证预测。"""
+    __tablename__ = "prediction_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    digest_date: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
+    blogger_slug: Mapped[str] = mapped_column(String(64), nullable=False)
+    blogger_name: Mapped[str] = mapped_column(String(60), nullable=False)
+    prediction_text: Mapped[str] = mapped_column(Text, nullable=False)
+    prediction_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    ticker: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    direction: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    verify_by_date: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    actual_result: Mapped[str | None] = mapped_column(Text, nullable=True)
+    verdict: Mapped[str] = mapped_column(String(16), default="pending", nullable=False)
+    analysis_md: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+    verified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class MarketSnapshotDaily(Base):
+    """每日关键标的收盘行情快照。"""
+    __tablename__ = "market_snapshot_daily"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    snapshot_date: Mapped[str] = mapped_column(String(10), nullable=False, index=True)
+    ticker: Mapped[str] = mapped_column(String(16), nullable=False)
+    ticker_name: Mapped[str | None] = mapped_column(String(60), nullable=True)
+    close_price: Mapped[float | None] = mapped_column(Float, nullable=True)
+    change_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pe: Mapped[float | None] = mapped_column(Float, nullable=True)
+    pb: Mapped[float | None] = mapped_column(Float, nullable=True)
+    market_cap: Mapped[float | None] = mapped_column(Float, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("snapshot_date", "ticker", name="uq_snapshot_date_ticker"),
+    )
+
+
 class QoderUsageLog(Base):
     """Qoder SDK 每次调用的 token 用量记录。"""
     __tablename__ = "qoder_usage_log"

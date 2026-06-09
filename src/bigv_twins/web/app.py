@@ -28,6 +28,7 @@ from .multi import router as multi_router
 from .backtest import about_track_router, compute_all_entries, router as backtest_router
 from .blogger_brief import generate_briefs_for_day
 from .digest import generate_daily_digest
+from .trends import router as trends_router, extract_predictions_from_digest, save_market_snapshot
 from .news_scraper import refresh_jin10_news
 from .report import router as report_router
 from .search import rebuild_search_index, router as search_router
@@ -112,6 +113,18 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(generate_daily_digest, CronTrigger(hour=3, minute=40),
                       id="daily_digest",
                       misfire_grace_time=3600, replace_existing=True)
+    # 03:45 — digest 完成后提取可验证预测
+    async def _extract_predictions():
+        from datetime import date, timedelta
+        yesterday = (date.today() - timedelta(days=1)).strftime("%Y-%m-%d")
+        await extract_predictions_from_digest(yesterday)
+    scheduler.add_job(_extract_predictions, CronTrigger(hour=3, minute=45),
+                      id="extract_predictions",
+                      misfire_grace_time=3600, replace_existing=True)
+    # 16:00 — 收盘后存行情快照
+    scheduler.add_job(save_market_snapshot, CronTrigger(hour=16, minute=0),
+                      id="market_snapshot",
+                      misfire_grace_time=3600, replace_existing=True)
     # Per-ticker brief refreshed 2x daily; UPSERT same-day row
     #   08:00 — 昨日收盘+隔夜消息  19:00 — 当日全天数据（收盘后 +1h）
     for hh, mm, jid in ((8, 0, "morning"), (19, 0, "evening")):
@@ -187,6 +200,7 @@ def create_app() -> FastAPI:
     app.include_router(chat_router)
     app.include_router(multi_router)
     app.include_router(report_router)
+    app.include_router(trends_router)            # /report/trends
     app.include_router(backtest_router)         # /report/leaderboard etc.
     app.include_router(about_track_router)      # /about/<slug>/track-record
     app.include_router(search_router)

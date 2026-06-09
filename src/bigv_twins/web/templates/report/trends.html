@@ -1,0 +1,165 @@
+{% extends "base.html" %}
+{% block title %}趋势追踪 · 赛博大V{% endblock %}
+
+{% block content %}
+<nav>
+  <ul>
+    <li><a href="/report">← 投资日报</a></li>
+    <li><strong>趋势追踪</strong></li>
+  </ul>
+</nav>
+
+<h2>📈 趋势追踪</h2>
+<p class="muted">大 V 观点 × 你的操作 × 市场走势 — 三条线交织，回顾学习。</p>
+
+<!-- 时间线 -->
+<section style="margin-top:1.5rem">
+  <h3>最近 14 天时间线</h3>
+
+  {% for d in digests %}
+  <details style="border:1px solid #e5e7eb; border-radius:8px; margin-bottom:0.6rem" {% if loop.first %}open{% endif %}>
+    <summary style="padding:0.6rem 1rem; background:#f8f9fa; cursor:pointer; display:flex; justify-content:space-between; align-items:center">
+      <div>
+        <strong>{{ d.digest_date }}</strong>
+        <small class="muted" style="margin-left:0.5rem">{{ d.blogger_count }} 位博主</small>
+      </div>
+      <div style="display:flex; gap:0.4rem; align-items:center">
+        {% set day_preds = [] %}
+        {% for p in predictions if p.digest_date == d.digest_date %}
+          {% if day_preds.append(p) %}{% endif %}
+        {% endfor %}
+        {% if day_preds %}
+        <span style="font-size:0.72rem; background:#dbeafe; color:#1d4ed8; padding:0.1rem 0.4rem; border-radius:3px">{{ day_preds|length }} 个预测</span>
+        {% endif %}
+
+        {% set day_notes = [] %}
+        {% for n in notes if n.created_at and n.created_at.strftime("%Y-%m-%d") == d.digest_date %}
+          {% if day_notes.append(n) %}{% endif %}
+        {% endfor %}
+        {% if day_notes %}
+        <span style="font-size:0.72rem; background:#fef3c7; color:#92400e; padding:0.1rem 0.4rem; border-radius:3px">{{ day_notes|length }} 篇随笔</span>
+        {% endif %}
+
+        {% set day_ops = [] %}
+        {% for j in journals if j.created_at and j.created_at.strftime("%Y-%m-%d") == d.digest_date %}
+          {% if day_ops.append(j) %}{% endif %}
+        {% endfor %}
+        {% if day_ops %}
+        <span style="font-size:0.72rem; background:#dcfce7; color:#166534; padding:0.1rem 0.4rem; border-radius:3px">{{ day_ops|length }} 笔操作</span>
+        {% endif %}
+      </div>
+    </summary>
+    <div style="padding:0.8rem 1rem">
+      <!-- Digest 摘要（只显示今日重点） -->
+      {% set digest_lines = d.digest_md.split('\n') %}
+      {% set in_highlight = false %}
+      {% set highlight_lines = [] %}
+      {% for line in digest_lines %}
+        {% if '今日重点' in line %}{% set _ = highlight_lines.clear() %}{% endif %}
+        {% if '今日重点' in line or (highlight_lines is defined and highlight_lines|length > 0 and highlight_lines|length < 8) %}
+          {% if line.strip() and '###' not in line %}{% if highlight_lines.append(line) %}{% endif %}{% endif %}
+        {% endif %}
+      {% endfor %}
+      <div style="font-size:0.85rem; margin-bottom:0.6rem; padding:0.5rem; background:#f0f9ff; border-radius:6px; border-left:3px solid #3b82f6">
+        <div class="digest-snippet" data-raw="{{ d.digest_md[:500] | replace('__ARCHIVE__', archive_base) }}">
+          {{ d.digest_md[:500] | replace('__ARCHIVE__', archive_base) }}
+        </div>
+        <a href="/report?digest_date={{ d.digest_date }}" style="font-size:0.78rem">查看完整 Digest →</a>
+      </div>
+
+      <!-- 当天的预测 -->
+      {% if day_preds %}
+      <div style="margin-bottom:0.5rem">
+        <div class="muted" style="font-size:0.78rem; margin-bottom:0.3rem">🔮 观察清单提取的预测</div>
+        {% for p in day_preds %}
+        <div style="font-size:0.82rem; padding:0.3rem 0; border-bottom:1px solid #f3f4f6; display:flex; justify-content:space-between">
+          <span>
+            {% if p.direction == 'bearish' %}📉{% elif p.direction == 'bullish' %}📈{% else %}➖{% endif %}
+            {{ p.prediction_text[:80] }}
+            <small class="muted">— {{ p.blogger_name }}</small>
+          </span>
+          <span style="font-size:0.72rem">
+            {% if p.verdict == 'pending' %}<span style="color:#92400e">⏳ 待验证</span>
+            {% elif p.verdict == 'correct' %}<span style="color:#166534">✅ 正确</span>
+            {% elif p.verdict == 'wrong' %}<span style="color:#dc2626">❌ 错误</span>
+            {% else %}<span class="muted">➖ 待定</span>{% endif %}
+          </span>
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <!-- 当天你的随笔 -->
+      {% if day_notes %}
+      <div style="margin-bottom:0.5rem">
+        <div class="muted" style="font-size:0.78rem; margin-bottom:0.3rem">📝 你的随笔</div>
+        {% for n in day_notes %}
+        <div style="font-size:0.82rem; padding:0.3rem 0.5rem; background:#fffbeb; border-radius:4px; margin-bottom:0.2rem">
+          {{ n.content[:120] }}{% if n.content|length > 120 %}…{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <!-- 当天你的操作 -->
+      {% if day_ops %}
+      <div>
+        <div class="muted" style="font-size:0.78rem; margin-bottom:0.3rem">💼 你的操作</div>
+        {% for j in day_ops %}
+        <div style="font-size:0.82rem; padding:0.2rem 0; border-bottom:1px solid #f3f4f6">
+          <span class="journal-action journal-action-{{ j.action }}" style="font-size:0.72rem">
+            {% if j.action == "open" %}建仓{% elif j.action == "add" %}加仓{% elif j.action == "reduce" %}减仓{% elif j.action == "close" %}清仓{% elif j.action == "dividend" %}派息{% else %}{{ j.action }}{% endif %}
+          </span>
+          <strong>{{ j.ticker_name }}</strong>
+          {% if j.price_at_decision %}¥{{ "%.2f"|format(j.price_at_decision) }}{% endif %}
+          {% if j.shares %}× {{ j.shares }}股{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+  </details>
+  {% endfor %}
+
+  {% if not digests %}
+  <p class="muted" style="padding:1.5rem; text-align:center; background:#f9fafb; border-radius:8px">
+    暂无 Digest 数据。等待每天 03:40 自动生成，或在投资日报页面手动触发。
+  </p>
+  {% endif %}
+</section>
+
+<!-- 待验证的预测汇总 -->
+{% set pending = [] %}
+{% for p in predictions if p.verdict == 'pending' %}{% if pending.append(p) %}{% endif %}{% endfor %}
+{% if pending %}
+<section style="margin-top:1.5rem">
+  <h3>⏳ 待验证的预测（{{ pending|length }} 条）</h3>
+  <table style="width:100%; font-size:0.82rem; border-collapse:collapse">
+    <thead><tr style="border-bottom:2px solid #e5e7eb; text-align:left">
+      <th style="padding:0.3rem">日期</th><th>博主</th><th>预测内容</th><th>方向</th><th>验证日</th>
+    </tr></thead>
+    <tbody>
+    {% for p in pending %}
+    <tr style="border-bottom:1px solid #f3f4f6">
+      <td style="padding:0.25rem">{{ p.digest_date }}</td>
+      <td>{{ p.blogger_name }}</td>
+      <td>{{ p.prediction_text[:60] }}{% if p.prediction_text|length > 60 %}…{% endif %}</td>
+      <td>{% if p.direction == 'bearish' %}📉{% elif p.direction == 'bullish' %}📈{% else %}➖{% endif %}</td>
+      <td>{{ p.verify_by_date or "—" }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</section>
+{% endif %}
+
+<script>
+// Render digest snippets as markdown
+document.querySelectorAll('.digest-snippet[data-raw]').forEach(function(el) {
+  if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
+    el.innerHTML = DOMPurify.sanitize(marked.parse(el.getAttribute('data-raw') || ''));
+  }
+});
+</script>
+
+{% endblock %}
