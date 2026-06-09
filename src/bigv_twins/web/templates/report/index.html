@@ -174,29 +174,45 @@
   {% endif %}
 </section>
 
-<!-- ============================== 博主今日观点 ============================== -->
+<!-- ============================== 每日 Digest ============================== -->
 <section style="margin-bottom:1.5rem">
-  <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.4rem">
-    <h3 style="margin:0">✍ 博主今日观点</h3>
-    <div style="display:flex; align-items:center; gap:0.8rem">
+  <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.4rem; flex-wrap:wrap; gap:0.5rem">
+    <h3 style="margin:0">✍ 每日博主观点汇总</h3>
+    <div style="display:flex; align-items:center; gap:0.6rem">
+      <input type="date" id="digest-date-picker" value="{{ digest.digest_date if digest else '' }}"
+        style="padding:0.2rem 0.4rem; font-size:0.75rem; border:1px solid #d1d5db; border-radius:4px"
+        onchange="window.location.href='/report?digest_date='+this.value">
       <small class="muted">
-        {% if blogger_briefs %}
-          {{ blogger_briefs[0][1].brief_date }} · 03:30 自动生成
+        {% if digest %}
+          {{ digest.digest_date }} · {{ digest.blogger_count }} 位博主 · {{ digest.model }}
         {% else %}
-          暂无（明天 03:30 起每天自动生成前一日总结）
+          暂无
         {% endif %}
       </small>
-      <form method="post" action="/report/briefs/regenerate" style="margin:0">
+      <form method="post" action="/report/digest/regenerate" style="margin:0">
         <button type="submit" class="secondary outline" style="padding:0.2rem 0.6rem; font-size:0.75rem; margin:0; width:auto"
-          onclick="this.disabled=true; this.textContent='生成中…'">
-          🔁 重新生成
+          onclick="this.disabled=true; this.textContent='生成中（约90s）…'">
+          🔁 生成 Digest
         </button>
       </form>
     </div>
   </div>
 
+  {% if digest %}
+    <article style="background:#fff; border:1px solid #e5e7eb; border-radius:8px; padding:0.8rem 1rem; margin-bottom:0.8rem">
+      <div class="digest-body" data-raw="{{ digest.digest_md | replace('__ARCHIVE__', archive_base) }}">{{ digest.digest_md | replace('__ARCHIVE__', archive_base) }}</div>
+    </article>
+  {% else %}
+    <article style="background:#f9fafb; border:1px solid #e5e7eb; border-radius:8px; padding:1.5rem; text-align:center; margin-bottom:0.8rem">
+      <p class="muted" style="margin:0">尚未生成 Digest。点击上方「🔁 生成 Digest」手动生成，或等待每天 03:35 自动生成。</p>
+    </article>
+  {% endif %}
+
+  <!-- 各博主独立 brief（折叠） -->
+  <details style="margin-top:0.5rem">
+    <summary style="cursor:pointer; font-size:0.85rem; color:#666">📋 查看各博主独立摘要（{{ blogger_briefs | length }} 位）</summary>
   {% if blogger_briefs %}
-    <div class="brief-grid">
+    <div class="brief-grid" style="margin-top:0.5rem">
       {% for b, br, tickers in blogger_briefs %}
         <article class="brief-card">
           <header style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.3rem">
@@ -221,9 +237,7 @@
       {% endfor %}
     </div>
   {% else %}
-    <p class="muted" style="padding:1rem; text-align:center; background:#f9fafb; border-radius:6px">
-      尚未生成任何博主日报。后台任务在 03:30 自动跑（依赖 zhihu 03:01 + bigv-twins-daily 03:21）。
-    </p>
+    <p class="muted" style="padding:0.5rem; font-size:0.85rem">暂无独立摘要。</p>
   {% endif %}
 </section>
 
@@ -460,7 +474,7 @@
 
 <script>
 // Render *_md as markdown HTML using marked + DOMPurify (loaded by base.html)
-document.querySelectorAll(".brief-body[data-raw], .watch-summary[data-raw]").forEach((el) => {
+document.querySelectorAll(".brief-body[data-raw], .watch-summary[data-raw], .digest-body[data-raw]").forEach((el) => {
   if (typeof marked === "undefined" || typeof DOMPurify === "undefined") return;
   const raw = el.getAttribute("data-raw");
   const html = DOMPurify.sanitize(marked.parse(raw || ""));

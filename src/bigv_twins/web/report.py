@@ -31,6 +31,7 @@ from bigv_twins.config import BY_SLUG
 
 from . import auth, db
 from .blogger_brief import get_latest_briefs
+from .digest import get_latest_digest, get_digest_for_date
 from .daily_brief import get_global_indices, get_watchlist_quotes
 from .db import BloggerDailyBrief, CachedNews, TickerDailyBrief, User, UserWatchlist
 from .news_scraper import get_cached_news
@@ -126,6 +127,13 @@ async def report_index(
     req_scheme = request.url.scheme or "http"
     archive_base = f"{req_scheme}://{req_host}:8000"
 
+    # Daily Digest（优先展示；如有日期参数则查指定日期）
+    digest_date = request.query_params.get("digest_date")
+    if digest_date:
+        digest = await get_digest_for_date(digest_date)
+    else:
+        digest = await get_latest_digest()
+
     return templates.TemplateResponse(
         request=request,
         name="report/index.html",
@@ -136,6 +144,7 @@ async def report_index(
             "indices": indices,
             "news": news,
             "blogger_briefs": blogger_brief_pairs,
+            "digest": digest,
             "archive_base": archive_base,
             "max_watchlist": MAX_WATCHLIST,
         },
@@ -162,6 +171,24 @@ async def briefs_regenerate(
     asyncio.create_task(generate_briefs_for_day(day_str))
     from fastapi.responses import RedirectResponse
     return RedirectResponse("/report?brief_regenerating=1", status_code=303)
+
+
+@router.post("/digest/regenerate")
+async def digest_regenerate(
+    request: Request,
+    user: Annotated[User, Depends(auth.require_user)],
+):
+    """手动重新生成 daily digest（删旧 + 重跑）。"""
+    from .digest import generate_daily_digest
+    from .db import DailyDigest as DD
+    day_str = request.query_params.get("date") or _yesterday_str()
+    async with db._SessionFactory() as s:
+        await s.execute(DD.__table__.delete().where(DD.digest_date == day_str))
+        await s.commit()
+    import asyncio
+    asyncio.create_task(generate_daily_digest(day_str))
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse("/report?digest_regenerating=1", status_code=303)
 
 
 @router.post("/watchlist/add")

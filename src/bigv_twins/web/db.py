@@ -485,6 +485,20 @@ class TokenUsageHourly(Base):
     by_model_json: Mapped[str] = mapped_column(Text, default="{}", nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, onupdate=_now, nullable=False)
 
+class DailyDigest(Base):
+    """每日全局 Digest — 汇总所有博主当天观点的跨博主分析。"""
+    __tablename__ = "daily_digest"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    digest_date: Mapped[str] = mapped_column(String(10), nullable=False, unique=True)
+    digest_md: Mapped[str] = mapped_column(Text, nullable=False)
+    digest_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    input_type: Mapped[str] = mapped_column(String(4), default="C", nullable=False)
+    model: Mapped[str] = mapped_column(String(32), default="ultimate", nullable=False)
+    blogger_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    generated_at: Mapped[datetime] = mapped_column(DateTime, default=_now, nullable=False)
+
+
 class QoderUsageLog(Base):
     """Qoder SDK 每次调用的 token 用量记录。"""
     __tablename__ = "qoder_usage_log"
