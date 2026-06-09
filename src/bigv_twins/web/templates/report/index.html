@@ -183,6 +183,7 @@
         {% if digest %}{{ digest.digest_date }} · {{ digest.blogger_count }} 位博主{% else %}暂无{% endif %}
       </small>
       <input type="date" id="digest-date-picker" value="{{ digest.digest_date if digest else '' }}"
+        max="{{ today_str }}"
         onclick="this.showPicker?this.showPicker():void(0)"
         style="padding:0.25rem 0.4rem; font-size:0.78rem; border:1px solid #d1d5db; border-radius:4px; width:9rem; cursor:pointer; -webkit-appearance:auto; appearance:auto; margin:0; height:2rem; min-height:0">
       <form method="post" action="/report/digest/regenerate" style="margin:0">
@@ -502,16 +503,22 @@ document.getElementById('digest-date-picker').addEventListener('change', functio
   var infoEl = document.querySelector('#digest-info');
   if (digestBody) digestBody.innerHTML = '<p class="muted">加载中…</p>';
   fetch('/report/api/digest?date=' + dt).then(function(r){return r.json()}).then(function(data) {
-    if (data.status === 'ok' && digestBody) {
+    if ((data.status === 'ok' || data.status === 'brief_fallback') && digestBody) {
       if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
         digestBody.innerHTML = DOMPurify.sanitize(marked.parse(data.digest_md || ''));
       } else {
         digestBody.textContent = data.digest_md || '';
       }
       digestBody.querySelectorAll('a[href]').forEach(function(a){a.target='_blank'; a.rel='noopener'});
-      if (infoEl) infoEl.textContent = data.date + ' · ' + data.blogger_count + ' 位博主';
+      if (infoEl) {
+        if (data.status === 'brief_fallback') {
+          infoEl.textContent = data.date + ' · 显示博主独立摘要（无 Digest）';
+        } else {
+          infoEl.textContent = data.date + ' · ' + data.blogger_count + ' 位博主';
+        }
+      }
     } else if (digestBody) {
-      digestBody.innerHTML = '<p class="muted">该日期无 digest 数据</p>';
+      digestBody.innerHTML = '<p class="muted">该日期无 Digest 也无博主摘要</p>';
     }
   });
 });

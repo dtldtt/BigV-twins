@@ -86,9 +86,9 @@ def _append_blogger_links(digest_md: str, posts_data: dict) -> str:
             links.append(f"[{title}]({url})")
         if not links:
             continue
-        links_md = "\n".join(f"  {lk}" for lk in links)
+        links_md = "\n".join(f"  - {lk}" for lk in links)
         pattern = re.compile(rf"(\*\*{re.escape(name)}\*\* — .+)")
-        replacement = rf"\1\n{links_md}"
+        replacement = rf"\1\n\n{links_md}\n"
         digest_md = pattern.sub(replacement, digest_md, count=1)
     return digest_md
 

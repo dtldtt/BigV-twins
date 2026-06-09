@@ -155,6 +155,7 @@ async def report_index(
             "digest": digest,
             "digest_dates": digest_dates,
             "archive_base": archive_base,
+            "today_str": date.today().strftime("%Y-%m-%d"),
             "max_watchlist": MAX_WATCHLIST,
         },
     )
@@ -193,11 +194,28 @@ async def digest_api(
         d = await get_latest_digest()
     else:
         d = await get_digest_for_date(date)
-    if not d:
-        return {"status": "not_found", "date": date}
     req_host = request.url.hostname or "8.155.174.112"
     req_scheme = request.url.scheme or "http"
     ab = f"{req_scheme}://{req_host}:8000"
+    if not d:
+        # 无 digest，回退查 brief
+        from .db import BloggerDailyBrief
+        async with db._SessionFactory() as s:
+            br_rows = await s.execute(
+                select(BloggerDailyBrief)
+                .where(BloggerDailyBrief.brief_date == date)
+                .where(BloggerDailyBrief.post_count > 0)
+            )
+            briefs = list(br_rows.scalars())
+        if briefs:
+            combined = "\n\n---\n\n".join(
+                f"**{BY_SLUG[br.blogger_slug].name if br.blogger_slug in BY_SLUG else br.blogger_slug}**\n\n"
+                + (br.brief_md or "").replace("__ARCHIVE__", ab)
+                for br in briefs
+            )
+            return {"status": "brief_fallback", "date": date,
+                    "digest_md": f"*该日期暂无 Digest，以下为各博主独立摘要：*\n\n{combined}"}
+        return {"status": "not_found", "date": date, "digest_md": ""}
     return {
         "status": "ok", "date": d.digest_date,
         "blogger_count": d.blogger_count,
