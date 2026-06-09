@@ -72,14 +72,21 @@ def _build_input_c(briefs: dict, posts_data: dict) -> str:
 
 
 def _append_blogger_links(digest_md: str, posts_data: dict) -> str:
-    """在速览 section 里，给每个博主名后面自动附加原文链接。"""
+    """在速览 section 里，给每个博主名后面自动附加原文链接（每行一个，用帖子标题）。"""
     for slug, pdata in posts_data.items():
         name = pdata["name"]
-        urls = [p.get("archive_url", "") for p in pdata["posts"] if p.get("archive_url")]
-        if not urls:
+        links = []
+        for p in pdata["posts"]:
+            url = p.get("archive_url", "")
+            if not url:
+                continue
+            ctype_label = {"answer": "回答", "article": "文章", "pin": "想法"}.get(
+                p.get("content_type", ""), "帖子")
+            title = p.get("title") or f"{ctype_label}（{p.get('created_time', '')[:16]}）"
+            links.append(f"[{title}]({url})")
+        if not links:
             continue
-        links_md = " ".join(f"[原文{i+1}]({u})" for i, u in enumerate(urls))
-        # 在博主名那一行后面追加链接
+        links_md = "\n".join(f"  {lk}" for lk in links)
         pattern = re.compile(rf"(\*\*{re.escape(name)}\*\* — .+)")
         replacement = rf"\1\n{links_md}"
         digest_md = pattern.sub(replacement, digest_md, count=1)

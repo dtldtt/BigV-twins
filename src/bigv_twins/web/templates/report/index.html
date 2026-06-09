@@ -183,7 +183,8 @@
         {% if digest %}{{ digest.digest_date }} · {{ digest.blogger_count }} 位博主{% else %}暂无{% endif %}
       </small>
       <input type="date" id="digest-date-picker" value="{{ digest.digest_date if digest else '' }}"
-        style="padding:0.25rem 0.4rem; font-size:0.78rem; border:1px solid #d1d5db; border-radius:4px; width:9rem; cursor:pointer">
+        onclick="this.showPicker?this.showPicker():void(0)"
+        style="padding:0.25rem 0.4rem; font-size:0.78rem; border:1px solid #d1d5db; border-radius:4px; width:9rem; cursor:pointer; -webkit-appearance:auto; appearance:auto; margin:0; height:2rem; min-height:0">
       <form method="post" action="/report/digest/regenerate" style="margin:0">
         <button type="submit" class="secondary outline" style="padding:0.3rem 1rem; font-size:0.78rem; margin:0; width:auto; white-space:nowrap"
           onclick="this.disabled=true; this.textContent='生成中…约90s'">
