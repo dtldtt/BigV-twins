@@ -27,6 +27,7 @@ from .db import User
 from .multi import router as multi_router
 from .backtest import about_track_router, compute_all_entries, router as backtest_router
 from .blogger_brief import generate_briefs_for_day
+from .digest import generate_daily_digest
 from .news_scraper import refresh_jin10_news
 from .report import router as report_router
 from .search import rebuild_search_index, router as search_router
@@ -106,6 +107,10 @@ async def lifespan(app: FastAPI):
     # daily indexer 03:21). Cron in Asia/Shanghai timezone.
     scheduler.add_job(_generate_blogger_briefs_and_index, CronTrigger(hour=3, minute=30),
                       id="blogger_brief_daily",
+                      misfire_grace_time=3600, replace_existing=True)
+    # Daily digest at 03:40 (after blogger briefs finish ~03:35)
+    scheduler.add_job(generate_daily_digest, CronTrigger(hour=3, minute=40),
+                      id="daily_digest",
                       misfire_grace_time=3600, replace_existing=True)
     # Per-ticker brief refreshed 2x daily; UPSERT same-day row
     #   08:00 — 昨日收盘+隔夜消息  19:00 — 当日全天数据（收盘后 +1h）

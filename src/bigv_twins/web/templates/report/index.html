@@ -178,21 +178,21 @@
 <section style="margin-bottom:1.5rem">
   <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:0.4rem; flex-wrap:wrap; gap:0.5rem">
     <h3 style="margin:0">✍ 每日博主观点汇总</h3>
-    <div style="display:flex; align-items:center; gap:0.6rem">
-      <input type="date" id="digest-date-picker" value="{{ digest.digest_date if digest else '' }}"
-        style="padding:0.2rem 0.4rem; font-size:0.75rem; border:1px solid #d1d5db; border-radius:4px"
-        onchange="window.location.href='/report?digest_date='+this.value">
+    <div style="display:flex; align-items:center; gap:0.5rem; flex-shrink:0">
       <small class="muted">
-        {% if digest %}
-          {{ digest.digest_date }} · {{ digest.blogger_count }} 位博主 · {{ digest.model }}
-        {% else %}
-          暂无
-        {% endif %}
+        {% if digest %}{{ digest.digest_date }} · {{ digest.blogger_count }} 位博主{% else %}暂无{% endif %}
       </small>
+      <select id="digest-date-picker" onchange="if(this.value) window.location.href='/report?digest_date='+this.value"
+        style="padding:0.25rem 0.4rem; font-size:0.78rem; border:1px solid #d1d5db; border-radius:4px; min-width:7rem">
+        <option value="">选择日期</option>
+        {% for dd in digest_dates %}
+        <option value="{{ dd }}" {% if digest and digest.digest_date == dd %}selected{% endif %}>{{ dd }}</option>
+        {% endfor %}
+      </select>
       <form method="post" action="/report/digest/regenerate" style="margin:0">
-        <button type="submit" class="secondary outline" style="padding:0.2rem 0.6rem; font-size:0.75rem; margin:0; width:auto"
-          onclick="this.disabled=true; this.textContent='生成中（约90s）…'">
-          🔁 生成 Digest
+        <button type="submit" class="secondary outline" style="padding:0.3rem 1rem; font-size:0.78rem; margin:0; width:auto; white-space:nowrap"
+          onclick="this.disabled=true; this.textContent='生成中…约90s'">
+          🔁 重新生成
         </button>
       </form>
     </div>
@@ -208,9 +208,9 @@
     </article>
   {% endif %}
 
-  <!-- 各博主独立 brief（折叠） -->
-  <details style="margin-top:0.5rem">
-    <summary style="cursor:pointer; font-size:0.85rem; color:#666">📋 查看各博主独立摘要（{{ blogger_briefs | length }} 位）</summary>
+  <!-- 各博主独立 brief（隐藏，仅在无 digest 时显示） -->
+  {% if not digest %}
+  <div style="margin-top:0.5rem">
   {% if blogger_briefs %}
     <div class="brief-grid" style="margin-top:0.5rem">
       {% for b, br, tickers in blogger_briefs %}
@@ -238,6 +238,8 @@
     </div>
   {% else %}
     <p class="muted" style="padding:0.5rem; font-size:0.85rem">暂无独立摘要。</p>
+  {% endif %}
+  </div>
   {% endif %}
 </section>
 

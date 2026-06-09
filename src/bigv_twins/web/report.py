@@ -128,11 +128,19 @@ async def report_index(
     archive_base = f"{req_scheme}://{req_host}:8000"
 
     # Daily Digest（优先展示；如有日期参数则查指定日期）
+    from .db import DailyDigest as DD
     digest_date = request.query_params.get("digest_date")
     if digest_date:
         digest = await get_digest_for_date(digest_date)
     else:
         digest = await get_latest_digest()
+
+    # 可选日期列表（供下拉框）
+    async with db._SessionFactory() as ds:
+        dd_rows = await ds.execute(
+            select(DD.digest_date).order_by(DD.digest_date.desc()).limit(30)
+        )
+        digest_dates = [r[0] for r in dd_rows]
 
     return templates.TemplateResponse(
         request=request,
@@ -145,6 +153,7 @@ async def report_index(
             "news": news,
             "blogger_briefs": blogger_brief_pairs,
             "digest": digest,
+            "digest_dates": digest_dates,
             "archive_base": archive_base,
             "max_watchlist": MAX_WATCHLIST,
         },
