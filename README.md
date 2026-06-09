@@ -41,6 +41,11 @@
 - [28. Token 用量监控仪表盘（管理员）](#28-token-用量监控仪表盘管理员)
 - [29. 分红股息率工具（A 股 + 港股 + ETF）](#29-分红股息率工具a-股--港股--etf)
 - [30. 全局搜索（zhihu 归档站）](#30-全局搜索zhihu-归档站)
+- [31. Prompt 模板化](#31-prompt-模板化)
+- [32. Daily Digest（每日博主观点全局汇总）](#32-daily-digest每日博主观点全局汇总)
+- [33. Qoder SDK Token 监控](#33-qoder-sdk-token-监控)
+- [34. 趋势追踪（/report/trends）](#34-趋势追踪reporttrends)
+- [35. AI 投顾股息率判断框架](#35-ai-投顾股息率判断框架)
 
 ---
 
@@ -2125,6 +2130,93 @@ CV（变异系数 = 标准差/均值）作为稳定性指标：
 - 短查询（< 3 字）自动 LIKE 兜底
 - 博主搜索结果链接到本地归档（避免已删帖 404），知乎原文做小角标
 - 每小时 cron 重建索引（zhihu 项目内）
+
+---
+
+## 31. Prompt 模板化
+
+> v0.7+ 新增。所有 LLM prompt 从 Python 字符串迁移到 `prompts/*.md` 模板文件。
+
+```
+prompts/
+  chat/
+    advisor.md            — AI 投顾对话（含股息率判断框架）
+    blogger.md            — 知乎博主分身对话
+    master.md             — 大师对话（通用化，适配 4 位大师）
+    master-challenge.md   — 大师检验模式
+  brief/
+    blogger-daily.md      — 博主日报总结（7 字段 JSON）
+    daily-digest.md       — 每日全局 Digest
+  review/
+    ticker-review.md      — per-ticker AI 回顾
+    monthly-review.md     — 月度成长复盘
+    single-trade-review.md — 单笔交易回顾
+```
+
+Python 代码通过 `prompt_loader.load_prompt("chat/advisor.md", blogger_slug="xxx")` 加载，支持 `{{变量}}` 替换。改 prompt 只需编辑 `.md` 文件，不碰 Python。
+
+---
+
+## 32. Daily Digest（每日博主观点全局汇总）
+
+> v0.7+ 新增。每天凌晨 03:40 自动生成。
+
+在各博主独立 brief 的基础上，用 Qoder SDK（ultimate 模型）做跨博主的交叉分析，输出一份全局 Digest：
+
+- **今日重点**：3 句话概述（情绪 + 共识 + 最重要信号）
+- **市场全景**：A 股 / 海外 / 板块 / 资金面（只写博主提到的，不补外部信息）
+- **博主共识**：至少 2 人持类似观点才算，按信号强度排序
+- **博主分歧**：不做裁判，分析「各自成立的前提条件」
+- **观察清单**：关键价位 / 事件窗口 / 待验证假设
+- **速览**：每人一句话 + 原文归档链接（脚本自动附加）
+
+输入方案 C（原文 + brief_json 混合），信息零损耗。存储在 `daily_digest` 表，支持日期选择器查历史。
+
+**定时任务链**：03:01 zhihu 爬虫 → 03:21 embedding → 03:30 各博主 brief → 03:40 Digest → 03:45 提取预测
+
+---
+
+## 33. Qoder SDK Token 监控
+
+> v0.7+ 新增。
+
+所有 Qoder SDK 调用统一走 `qoder_call.py`，自动记录 token 用量到 `qoder_usage_log` 表（task_type / model / input_tokens / output_tokens / duration_ms）。
+
+`/admin/cost` 独立仪表盘：
+- 左栏 Qoder：模型切换（ultimate/performance）+ 折线图（30 天/月度）+ 调用记录
+- 右栏 Qwen/OpenClaw：图表 + 月度归档
+- 两套系统完全独立统计
+
+---
+
+## 34. 趋势追踪（/report/trends）
+
+> v0.7+ Phase 1。数据积累阶段。
+
+三条线交织的投资学习系统：
+1. **大 V 说了什么** — 每日 Digest 归档
+2. **我怎么想怎么做的** — 投资随笔 + 操作记录
+3. **市场实际走了什么** — 每日行情快照
+
+当前实现：
+- `prediction_log` 表：从 Digest 观察清单自动提取可验证预测（03:45 cron）
+- `market_snapshot_daily` 表：关键标的收盘行情快照（16:00 cron）
+- `/report/trends` 时间线页面：按天展开 Digest 摘要 + 预测 + 用户随笔 + 用户操作
+
+后续计划见 `docs/roadmap.md`。
+
+---
+
+## 35. AI 投顾股息率判断框架
+
+> v0.7+ 新增，在 AI 投顾 prompt 中。
+
+分红问题的回答不再只给数字，还会根据公司质地分层建议：
+
+- **国有银行**：六大行（工农中建邮储交通）为第一梯队，股息率 ≥ 5% 有投资吸引力
+- **大市值白马蓝筹**：千亿级市值 + 行业垄断 + 盈利稳定，同样 ≥ 5% 有吸引力
+- **中小公司 / 分红不稳定**：即使高股息也提示风险
+- **等待档位计算**：自动算出 5.5% 和 6.0% 对应的买入价
 
 ---
 
