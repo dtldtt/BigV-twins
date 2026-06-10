@@ -1,6 +1,6 @@
 # BigV-twins
 
-> 投资博主的"数字分身" —— 把知乎归档变成可对话的 RAG 知识库，挂在 OpenClaw agent 上随时问；外加一位中立 AI 投顾做对照组。
+> v0.7 — 投资博主的"数字分身" —— 把知乎归档变成可对话的 RAG 知识库，挂在 OpenClaw agent 上随时问；外加一位中立 AI 投顾做对照组。
 
 5 位归档博主 = 每位一个 [Skill](https://docs.openclaw.ai/clawhub/skill-format.md) + 一份 [persona 摘要](personas/) + 一份 [向量化的归档](twins/) + 共享的两个 MCP server（博主语料 + 市场数据）。专门的 `bigv` agent 收到问题 → 调 MCP server 读 persona / 检索语料 / 拿真实行情 → 用 OpenClaw 配的 LLM 生成带引文的第一人称回答。
 

@@ -26,3 +26,4 @@ logs/
 # OS
 .DS_Store
 chats.db-journal
+docs/handoff/session-transcript-*.jsonl
