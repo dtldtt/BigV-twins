@@ -75,5 +75,54 @@
 .period-quarter { background:#f3e5f5; color:#7b1fa2; }
 .period-manual { background:#f5f5f5; color:#666; }
 .report-snippet { font-size:0.82rem; color:#555; line-height:1.5; white-space:pre-wrap; max-height:5em; overflow:hidden; }
+.closed-review-body { font-size:0.85rem; line-height:1.6; }
+.closed-review-body h2, .closed-review-body h3 { font-size:1rem; margin:0.8rem 0 0.3rem; }
+.closed-review-body table { width:100%; border-collapse:collapse; font-size:0.82rem; margin:0.4rem 0; }
+.closed-review-body th, .closed-review-body td { padding:0.3rem 0.5rem; border-bottom:1px solid #eee; text-align:left; }
+.closed-review-body th { background:#f8f9fa; }
 </style>
+
+<!-- ====== 月度清仓复盘 ====== -->
+{% if closed_by_month %}
+<section style="margin-top:2rem">
+  <h3>🔒 已清仓标的复盘</h3>
+  <p class="muted" style="font-size:0.82rem; margin-top:-0.3rem">每月 1 号自动生成。按月分组，最新月展开。</p>
+
+  {% for month, reviews in closed_by_month.items() %}
+  <details style="border:1px solid #e5e7eb; border-radius:8px; margin-bottom:0.6rem" {% if loop.first %}open{% endif %}>
+    <summary style="padding:0.6rem 1rem; background:#f8f9fa; cursor:pointer; font-size:0.88rem">
+      <strong>{{ month }}</strong>
+      <small class="muted" style="margin-left:0.5rem">{{ reviews|length }} 只清仓标的</small>
+    </summary>
+    <div style="padding:0.6rem 1rem">
+      {% for cr in reviews %}
+      <details style="border:1px solid #f0f0f0; border-radius:6px; margin-bottom:0.5rem">
+        <summary style="padding:0.5rem 0.8rem; cursor:pointer; font-size:0.85rem; display:flex; justify-content:space-between; align-items:center">
+          <span>
+            <strong>{{ cr.ticker }}</strong>
+            {% if cr.current_price %}
+            <small class="muted">清仓价 ¥{{ "%.2f"|format(cr.current_price) }}</small>
+            {% endif %}
+          </span>
+          <small class="muted">{{ cr.created_at.strftime("%Y-%m-%d") if cr.created_at else "" }}</small>
+        </summary>
+        <div class="closed-review-body" style="padding:0.5rem 0.8rem" data-raw="{{ cr.review_report_md or '' }}">
+          {{ cr.review_report_md or '' }}
+        </div>
+      </details>
+      {% endfor %}
+    </div>
+  </details>
+  {% endfor %}
+</section>
+{% endif %}
+
+<script>
+document.querySelectorAll('.closed-review-body[data-raw]').forEach(function(el) {
+  if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
+    el.innerHTML = DOMPurify.sanitize(marked.parse(el.getAttribute('data-raw') || ''));
+  }
+});
+</script>
+
 {% endblock %}

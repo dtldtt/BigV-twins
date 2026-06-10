@@ -49,9 +49,28 @@ async def growth_timeline(
         except json.JSONDecodeError:
             continue
 
+    # 已清仓复盘（按月分组）
+    from .db import DecisionReview
+    from sqlalchemy import func as sqlfunc
+    closed_rows = await session.execute(
+        select(DecisionReview)
+        .where(DecisionReview.user_id == user.id)
+        .where(DecisionReview.review_type == "closed")
+        .order_by(DecisionReview.created_at.desc())
+    )
+    closed_reviews = list(closed_rows.scalars())
+    # 按月分组
+    closed_by_month: dict[str, list] = {}
+    for cr in closed_reviews:
+        month = cr.created_at.strftime("%Y-%m") if cr.created_at else "unknown"
+        closed_by_month.setdefault(month, []).append(cr)
+
     return templates.TemplateResponse(
         request=request, name="growth/timeline.html",
-        context={"user": user, "reports": reports, "all_lessons": all_lessons},
+        context={
+            "user": user, "reports": reports, "all_lessons": all_lessons,
+            "closed_by_month": closed_by_month,
+        },
     )
 
 
