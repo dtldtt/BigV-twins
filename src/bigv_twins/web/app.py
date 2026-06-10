@@ -29,6 +29,7 @@ from .backtest import about_track_router, compute_all_entries, router as backtes
 from .blogger_brief import generate_briefs_for_day
 from .digest import generate_daily_digest
 from .trends import router as trends_router, extract_predictions_from_digest, save_market_snapshot
+from .persona_updater import run_monthly_persona_update
 from .news_scraper import refresh_jin10_news
 from .report import router as report_router
 from .search import rebuild_search_index, router as search_router
@@ -144,6 +145,9 @@ async def lifespan(app: FastAPI):
     scheduler.add_job(sync_all_users_dividends, CronTrigger(hour=17, minute=30),
                       id="dividend_sync", misfire_grace_time=3600, replace_existing=True)
 
+    # Persona 月度更新 — 每月 1 号 06:00
+    scheduler.add_job(run_monthly_persona_update, CronTrigger(day=1, hour=6, minute=0),
+                      id="persona_monthly_update", misfire_grace_time=7200, replace_existing=True)
     # 成长复盘 — 月度（每月 1 号 09:00 跑上月）+ 季度（1/4/7/10 月 1 号 09:30 跑上季）
     scheduler.add_job(run_monthly_growth_reports, CronTrigger(day=1, hour=9, minute=0),
                       id="growth_monthly", misfire_grace_time=3600, replace_existing=True)
