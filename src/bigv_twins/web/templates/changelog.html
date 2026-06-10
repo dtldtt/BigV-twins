@@ -7,6 +7,83 @@
 
 <article class="changelog-entry">
   <header>
+    <h3>v0.7 <small class="muted">2026-06-10</small></h3>
+  </header>
+
+  <h4>✍ 每日博主观点汇总（Daily Digest）</h4>
+  <ul>
+    <li><strong>全局汇总取代独立卡片</strong>：不再按博主分开展示，改为一份跨博主的综合分析报告</li>
+    <li><strong>五段式结构</strong>：今日重点（3 句话速读）→ 市场全景 → 博主共识 → 博主分歧 → 观察清单</li>
+    <li><strong>每天 03:40 自动生成</strong>，也可手动触发重新生成</li>
+    <li><strong>日期选择器</strong>：可查看历史任意日期的 Digest，无 Digest 时自动回退显示各博主独立摘要</li>
+    <li><strong>原文链接跟随访问方式</strong>：http/IP 访问则链接用 http，https/域名 访问则链接用 https</li>
+  </ul>
+
+  <h4>🤖 AI 对话全面升级</h4>
+  <ul>
+    <li><strong>所有对话 prompt 重写</strong>：AI 投顾 / 大师对话 / 检验模式 / 博主分身，全部从零审查并升级</li>
+    <li><strong>AI 投顾新增股息率判断框架</strong>：区分国有银行（六大行）/ 大蓝筹 / 中小公司三类，自动计算 5.5% 和 6% 的等待买入价</li>
+    <li><strong>大师对话升级</strong>：不再回避 A 股问题，主动用大师的框架分析现代标的；敢于直接反对用户的投机行为</li>
+    <li><strong>检验模式升级</strong>：从固定打分表改为抓住最致命的问题深挖；加入市场环境假设检验和时间框架错配检测</li>
+    <li><strong>博主分身升级</strong>：定位为 A 股实战派，数据自然融入叙述，区分长期观点和临时判断</li>
+  </ul>
+
+  <h4>🔒 已清仓标的复盘（新功能）</h4>
+  <ul>
+    <li>每月 1 号自动对上月清仓的标的逐个生成复盘报告</li>
+    <li>逐笔审视每次加仓的合理性，分析建仓时机、最大浮盈/浮亏时的关键时刻</li>
+    <li>提取可复用的投资规则，给出具体的替代方案（带数字计算）</li>
+    <li>在「成长复盘」页面按月分组展示，历史记录可折叠查看</li>
+  </ul>
+
+  <h4>📈 趋势追踪（/report/trends，新功能）</h4>
+  <ul>
+    <li>三条线交织的时间线：大 V 观点 × 你的操作 × 你的随笔，按天对齐展示</li>
+    <li>从 Digest 的观察清单中自动提取可验证预测，每日记录关键标的行情快照</li>
+    <li>后续版本将加入自动验证 + 周度复盘 + 投资规则知识库</li>
+  </ul>
+
+  <h4>🪙 Token 用量监控</h4>
+  <ul>
+    <li>新增 <code>/admin/cost</code> 独立仪表盘</li>
+    <li>Qoder SDK 用量：按模型（ultimate / auto / performance）分类，折线图 + 月度归档 + 调用记录</li>
+    <li>Qwen/OpenClaw 用量：图表 + 月度账单归档，与 Qoder 独立统计</li>
+  </ul>
+
+  <h4>📝 博主日报改善</h4>
+  <ul>
+    <li>Markdown 分段格式（分段标题 + 金句列表 + 情绪标签），可读性大幅提升</li>
+    <li>每篇帖子附归档原文链接（用帖子标题，一行一个）</li>
+    <li>默认折叠 + 展开/收起按钮，卡片高度统一</li>
+    <li>重新生成按钮：手动触发一键重跑</li>
+  </ul>
+
+  <h4>👤 Persona 月度自动更新（新功能）</h4>
+  <ul>
+    <li>每月 1 号自动根据上月博主发言更新其风格画像</li>
+    <li>增量更新不推翻：保留旧内容，只叠加新发现的表达习惯、关注领域变化</li>
+    <li>更新前后自动 git 归档，可随时回滚</li>
+  </ul>
+
+  <h4>🐛 Bug 修复</h4>
+  <ul>
+    <li>分红自动按股权登记日计算持股数（之前需要手动填写，容易出错）</li>
+    <li>投资记录页面加当日涨跌幅显示（红涨绿跌），总盈亏颜色修复</li>
+    <li>修复 zhihu 归档数据库读不到新数据的问题（immutable 标志导致）</li>
+    <li>Journal 详情页去掉清仓操作表单（清仓统一通过新建记录）</li>
+    <li>jin10 新闻刷新频率从 4 小时改为 2 小时</li>
+  </ul>
+
+  <h4>🏗 架构优化</h4>
+  <ul>
+    <li><strong>Prompt 模板化</strong>：所有 AI prompt 从代码中迁移到 <code>prompts/*.md</code> 文件，改 prompt 不用改代码</li>
+    <li><strong>Qoder SDK 统一封装</strong>：所有 Qoder 调用走 <code>qoder_call.py</code>，自动记录 token 用量</li>
+    <li><strong>博主日报并行生成</strong>：5 个博主同时跑，从 ~10 分钟缩短到 ~2 分钟</li>
+  </ul>
+</article>
+
+<article class="changelog-entry">
+  <header>
     <h3>v0.6 <small class="muted">2026-05-28</small></h3>
   </header>
   <h4>💼 投资记录系统（重命名 + 大改造）</h4>
