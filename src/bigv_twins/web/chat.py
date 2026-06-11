@@ -23,12 +23,17 @@ from bigv_twins.market_data import (
 )
 from bigv_twins.prompt_loader import load_prompt
 
-from . import auth, db, openclaw_client
+from . import auth, db, openclaw_client, qoder_call
 from .db import BloggerOverride, Conversation, Message, User
 
 log = logging.getLogger("bigv_twins.web.chat")
 router = APIRouter(prefix="/chat")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+
+# Recap 阈值配置
+RECAP_FIRST_THRESHOLD = 8   # 首次触发 recap 的消息数
+RECAP_UPDATE_INTERVAL = 6   # 之后每增加这么多消息更新一次 recap
+RECAP_RECENT_ROUNDS = 3     # 使用 recap 时保留的最近对话轮数（1 轮 = user + assistant）
 
 
 # ------------------------------------------------------------ helpers
@@ -204,6 +209,74 @@ async def delete_conversation(
 
 
 # ============================================================================
+# Recap 生成
+# ============================================================================
+
+async def _generate_recap(cid: int) -> None:
+    """生成或更新对话 recap。异步调用 OpenClaw，完成后写入 DB。"""
+    try:
+        # 读取完整对话历史
+        async with db._SessionFactory() as session:
+            conv = await session.get(Conversation, cid)
+            if conv is None:
+                return
+
+            msg_rows = await session.execute(
+                select(Message)
+                .where(Message.conversation_id == cid)
+                .order_by(Message.created_at)
+            )
+            messages = list(msg_rows.scalars())
+            total_msg_count = len(messages)
+
+        # 检查是否满足生成条件
+        if total_msg_count < RECAP_FIRST_THRESHOLD:
+            return
+        if conv.recap and conv.recap_msg_count >= total_msg_count - RECAP_UPDATE_INTERVAL:
+            return  # recap 还够新，不需要更新
+
+        # 格式化对话历史
+        history_lines = []
+        for m in messages:
+            role_label = "用户" if m.role == "user" else "助手"
+            history_lines.append(f"【{role_label}】\n{m.content}\n")
+        history_text = "\n".join(history_lines)
+
+        # 加载 recap prompt
+        recap_system_prompt = load_prompt("recap.md")
+
+        # 调用 Qoder 生成 recap（避免 OpenClaw agent loop 的系统 prompt 冲突）
+        full_prompt = f"{recap_system_prompt}\n\n以下是完整对话历史：\n\n{history_text}"
+
+        recap_text = await qoder_call.call_qoder(
+            prompt=full_prompt,
+            task_type="recap",
+            task_detail=f"cid={cid}",
+            model="auto",
+        )
+
+        if not recap_text:
+            log.warning("recap generation returned empty for cid=%s", cid)
+            return
+
+        recap_text = recap_text.strip()
+
+        # 写入 DB
+        async with db._SessionFactory() as session:
+            conv = await session.get(Conversation, cid)
+            if conv is not None:
+                conv.recap = recap_text
+                conv.recap_updated_at = datetime.now(timezone.utc)
+                conv.recap_msg_count = total_msg_count
+                await session.commit()
+                log.info("generated recap for cid=%s (%d chars, %d msgs)",
+                        cid, len(recap_text), total_msg_count)
+
+    except Exception:
+        log.exception("recap generation failed for cid=%s", cid)
+
+
+# ============================================================================
 # In-flight chat state — survives client disconnect
 # ============================================================================
 # Per-conversation dict tracking the active background LLM task.
@@ -254,6 +327,10 @@ async def _run_chat_background(cid: int, messages: list, target_model: str):
                 log.info("persisted assistant msg for cid=%s (%d chars)", cid, len(full))
             except Exception:
                 log.exception("DB save failed for cid=%s", cid)
+
+        # 触发 recap 生成（如果满足条件）
+        asyncio.create_task(_generate_recap(cid))
+
         # Keep state alive for 60s so late reconnects can get the full reply
         await asyncio.sleep(60)
         _INFLIGHT.pop(cid, None)
@@ -376,10 +453,49 @@ async def ask(
             except Exception:
                 log.exception("market_data fetch failed; continuing without context")
 
-        messages = [{"role": "system", "content": sys_prompt}]
-        for m in history:
-            messages.append({"role": m.role, "content": m.content})
-        messages.append({"role": "user", "content": user_text})
+        # 构建 messages：如果消息数 >= 阈值且有 recap，使用 recap + 最近几轮
+        total_msg_count = len(history) + 1  # +1 是即将加入的 user msg
+
+        # Fallback: 即使没有 recap，超过 20 条消息也强制截断，只保留最近 6 轮
+        if total_msg_count >= 20 and not conv.recap:
+            log.warning("no recap for cid=%s but %d msgs — forcing truncation", cid, total_msg_count)
+            recent_msgs = history[-12:] if len(history) >= 12 else history  # 最近 6 轮 = 12 条
+            messages = [{"role": "system", "content": sys_prompt}]
+            for m in recent_msgs:
+                messages.append({"role": m.role, "content": m.content})
+            messages.append({"role": "user", "content": user_text})
+
+        elif total_msg_count >= RECAP_FIRST_THRESHOLD and conv.recap:
+            # 检查 recap 是否还够新
+            if conv.recap_msg_count >= total_msg_count - RECAP_UPDATE_INTERVAL:
+                # 使用 recap + 最近 N 轮对话
+                recap_block = f"[以下是本次对话的历史摘要，请在此基础上继续回答]\n\n{conv.recap}"
+
+                # 取最近 N 轮（每轮 = user + assistant = 2 条消息）
+                recent_msgs = history[-(RECAP_RECENT_ROUNDS * 2):] if len(history) >= RECAP_RECENT_ROUNDS * 2 else history
+
+                messages = [
+                    {"role": "system", "content": sys_prompt},
+                    {"role": "user", "content": recap_block},
+                ]
+                for m in recent_msgs:
+                    messages.append({"role": m.role, "content": m.content})
+                messages.append({"role": "user", "content": user_text})
+
+                log.info("using recap for cid=%s (total=%d, recap_msgs=%d, recent=%d)",
+                        cid, total_msg_count, conv.recap_msg_count, len(recent_msgs))
+            else:
+                # recap 太旧了，先用完整历史，等这次回答完会触发更新
+                messages = [{"role": "system", "content": sys_prompt}]
+                for m in history:
+                    messages.append({"role": m.role, "content": m.content})
+                messages.append({"role": "user", "content": user_text})
+        else:
+            # 消息数不够或没有 recap，使用完整历史
+            messages = [{"role": "system", "content": sys_prompt}]
+            for m in history:
+                messages.append({"role": m.role, "content": m.content})
+            messages.append({"role": "user", "content": user_text})
 
         # Route to per-blogger OpenClaw agent (default "bigv" for archived bloggers,
         # "advisor" for the AI advisor card; configured via bloggers.json).
@@ -393,7 +509,13 @@ async def ask(
         await session.commit()
 
     # Spawn LLM as a detached background task — survives client disconnect.
-    # If there's already an in-flight task for this cid (rare race), don't start another.
+    # 如果之前的 task 已完成（成功或失败），清理它再创建新 task
+    if cid in _INFLIGHT:
+        state = _INFLIGHT[cid]
+        if state["done"].is_set():
+            _INFLIGHT.pop(cid, None)
+            log.info("cleaned up completed inflight state for cid=%s", cid)
+
     if cid not in _INFLIGHT:
         _INFLIGHT[cid] = {
             "buf": [],

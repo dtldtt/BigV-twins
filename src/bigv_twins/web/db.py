@@ -83,6 +83,10 @@ class Conversation(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_now, onupdate=_now, nullable=False, index=True
     )
+    # v0.7.1: recap 摘要 — 当对话消息 >= 8 条时生成，之后每增加 6 条更新一次
+    recap: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
+    recap_updated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, default=None)
+    recap_msg_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     user: Mapped[User] = relationship(back_populates="conversations")
     messages: Mapped[list["Message"]] = relationship(
@@ -132,6 +136,8 @@ class MultiConversation(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=_now, onupdate=_now, nullable=False, index=True
     )
+    # v0.7.1: per-blogger recap — JSON 结构 {slug: {recap, msg_count, updated_at}}
+    per_blogger_recaps: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
 
     messages: Mapped[list["MultiMessage"]] = relationship(
         back_populates="conversation",

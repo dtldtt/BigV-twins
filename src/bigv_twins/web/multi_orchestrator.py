@@ -35,17 +35,32 @@ from bigv_twins.market_data import (
     format_market_context_for_prompt as md_format,
     get_market_context as md_get,
 )
+from bigv_twins.prompt_loader import load_prompt
 
-from . import db, openclaw_client
+from . import db, openclaw_client, qoder_call
 from .chat import system_prompt_for
 from .db import MultiConversation, MultiMessage, MultiSubResponse
 
 log = logging.getLogger("bigv_twins.web.multi_orchestrator")
 
+RECAP_FIRST_THRESHOLD = 8
+RECAP_UPDATE_INTERVAL = 6
+RECAP_RECENT_ROUNDS = 3
+
 
 def _sse(event: str, **kw) -> str:
     """Format one SSE event line."""
     return f"data: {json.dumps({'event': event, **kw}, ensure_ascii=False)}\n\n"
+
+
+def _load_per_blogger_recaps(conv: MultiConversation) -> dict:
+    """Parse per_blogger_recaps JSON from conv, return empty dict if not set."""
+    if not conv.per_blogger_recaps:
+        return {}
+    try:
+        return json.loads(conv.per_blogger_recaps)
+    except (json.JSONDecodeError, TypeError):
+        return {}
 
 
 async def _build_messages_for_blogger(
@@ -54,6 +69,7 @@ async def _build_messages_for_blogger(
     conv_id: int,
     user_text: str,
     market_context_block: str | None,
+    recaps: dict,
 ) -> list[dict]:
     """For one blogger in this multi-conv, build their personal message thread.
 
@@ -64,10 +80,7 @@ async def _build_messages_for_blogger(
     if market_context_block:
         sys_prompt = sys_prompt + "\n\n" + market_context_block
 
-    messages: list[dict] = [{"role": "system", "content": sys_prompt}]
-
-    # Walk prior turns. For each role='user' MultiMessage in this conv (oldest
-    # first), append it + this blogger's matching sub_response (if any, status=done).
+    # Walk prior turns
     rows = await session.execute(
         select(MultiMessage)
         .where(MultiMessage.conversation_id == conv_id)
@@ -75,8 +88,10 @@ async def _build_messages_for_blogger(
         .order_by(MultiMessage.created_at)
     )
     prior_users = list(rows.scalars())
+
+    # Build full history list: (user_msg, assistant_response_or_none) pairs
+    history: list[tuple[str, str | None]] = []
     for um in prior_users:
-        messages.append({"role": "user", "content": um.content})
         sub = await session.execute(
             select(MultiSubResponse)
             .where(MultiSubResponse.user_message_id == um.id)
@@ -84,10 +99,53 @@ async def _build_messages_for_blogger(
             .where(MultiSubResponse.status == "done")
         )
         sub_row = sub.scalar_one_or_none()
-        if sub_row and sub_row.content:
-            messages.append({"role": "assistant", "content": sub_row.content})
+        history.append((um.content, sub_row.content if sub_row else None))
 
-    messages.append({"role": "user", "content": user_text})
+    total_turns = len(history) + 1  # +1 for current user_text
+
+    # Check recap availability for this blogger
+    recap_info = recaps.get(blogger.slug)
+    has_fresh_recap = (
+        recap_info
+        and recap_info.get("recap")
+        and recap_info.get("msg_count", 0) >= total_turns - RECAP_UPDATE_INTERVAL
+    )
+
+    messages: list[dict] = [{"role": "system", "content": sys_prompt}]
+
+    if has_fresh_recap:
+        # Use recap + recent rounds
+        recap_block = f"[以下是本次对话的历史摘要，请在此基础上继续回答]\n\n{recap_info['recap']}"
+        messages.append({"role": "user", "content": recap_block})
+
+        recent = history[-RECAP_RECENT_ROUNDS:] if len(history) >= RECAP_RECENT_ROUNDS else history
+        for user_msg, assistant_msg in recent:
+            messages.append({"role": "user", "content": user_msg})
+            if assistant_msg:
+                messages.append({"role": "assistant", "content": assistant_msg})
+        messages.append({"role": "user", "content": user_text})
+        log.info("multi: using recap for %s in mc_id=%d (turns=%d, recap_msgs=%d)",
+                blogger.slug, conv_id, total_turns, recap_info.get("msg_count", 0))
+
+    elif total_turns >= 20:
+        # Fallback: no recap but too many turns, truncate
+        log.warning("multi: no recap for %s in mc_id=%d but %d turns — forcing truncation",
+                   blogger.slug, conv_id, total_turns)
+        recent = history[-6:] if len(history) >= 6 else history  # 最近 6 轮
+        for user_msg, assistant_msg in recent:
+            messages.append({"role": "user", "content": user_msg})
+            if assistant_msg:
+                messages.append({"role": "assistant", "content": assistant_msg})
+        messages.append({"role": "user", "content": user_text})
+
+    else:
+        # Full history
+        for user_msg, assistant_msg in history:
+            messages.append({"role": "user", "content": user_msg})
+            if assistant_msg:
+                messages.append({"role": "assistant", "content": assistant_msg})
+        messages.append({"role": "user", "content": user_text})
+
     return messages
 
 
@@ -214,6 +272,92 @@ async def _run_summary_stream(
                 log.exception("multi: failed to persist summary")
 
 
+# ============================================================================
+# Per-blogger recap generation
+# ============================================================================
+
+async def _generate_multi_recap_for_blogger(
+    multi_conv_id: int, blogger_slug: str,
+) -> None:
+    """Generate or update recap for one blogger in a multi conversation."""
+    try:
+        async with db._SessionFactory() as session:
+            conv = await session.get(MultiConversation, multi_conv_id)
+            if conv is None:
+                return
+
+            # Count user turns
+            user_rows = await session.execute(
+                select(MultiMessage)
+                .where(MultiMessage.conversation_id == multi_conv_id)
+                .where(MultiMessage.role == "user")
+                .order_by(MultiMessage.created_at)
+            )
+            user_msgs = list(user_rows.scalars())
+            total_turns = len(user_msgs)
+
+        if total_turns < RECAP_FIRST_THRESHOLD:
+            return
+
+        # Check existing recap freshness
+        recaps = _load_per_blogger_recaps(conv)
+        recap_info = recaps.get(blogger_slug)
+        if recap_info and recap_info.get("msg_count", 0) >= total_turns - RECAP_UPDATE_INTERVAL:
+            return  # recap is fresh enough
+
+        # Build history text for this blogger only
+        history_lines = []
+        async with db._SessionFactory() as session:
+            for um in user_msgs:
+                sub = await session.execute(
+                    select(MultiSubResponse)
+                    .where(MultiSubResponse.user_message_id == um.id)
+                    .where(MultiSubResponse.blogger_slug == blogger_slug)
+                    .where(MultiSubResponse.status == "done")
+                )
+                sub_row = sub.scalar_one_or_none()
+                history_lines.append(f"【用户】\n{um.content}\n")
+                if sub_row and sub_row.content:
+                    history_lines.append(f"【助手】\n{sub_row.content}\n")
+        history_text = "\n".join(history_lines)
+
+        # Generate recap via Qoder
+        recap_system_prompt = load_prompt("recap.md")
+        full_prompt = f"{recap_system_prompt}\n\n以下是完整对话历史：\n\n{history_text}"
+
+        recap_text = await qoder_call.call_qoder(
+            prompt=full_prompt,
+            task_type="multi_recap",
+            task_detail=f"mc_id={multi_conv_id},slug={blogger_slug}",
+            model="auto",
+        )
+
+        if not recap_text:
+            log.warning("multi recap returned empty for mc_id=%d slug=%s", multi_conv_id, blogger_slug)
+            return
+
+        recap_text = recap_text.strip()
+
+        # Save to DB
+        async with db._SessionFactory() as session:
+            conv = await session.get(MultiConversation, multi_conv_id)
+            if conv is None:
+                return
+            recaps = _load_per_blogger_recaps(conv)
+            recaps[blogger_slug] = {
+                "recap": recap_text,
+                "msg_count": total_turns,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            conv.per_blogger_recaps = json.dumps(recaps, ensure_ascii=False)
+            await session.commit()
+            log.info("generated multi recap for mc_id=%d slug=%s (%d chars, %d turns)",
+                    multi_conv_id, blogger_slug, len(recap_text), total_turns)
+
+    except Exception:
+        log.exception("multi recap failed for mc_id=%d slug=%s", multi_conv_id, blogger_slug)
+
+
 async def orchestrate(
     multi_conv_id: int,
     bloggers: list[Blogger],
@@ -230,10 +374,14 @@ async def orchestrate(
     """
     # Pre-build each blogger's messages list (separate DB session, then close)
     blogger_messages: dict[str, list[dict]] = {}
+    recaps: dict = {}
     async with db._SessionFactory() as session:
+        conv = await session.get(MultiConversation, multi_conv_id)
+        if conv:
+            recaps = _load_per_blogger_recaps(conv)
         for b in bloggers:
             blogger_messages[b.slug] = await _build_messages_for_blogger(
-                session, b, multi_conv_id, user_text, market_context_block,
+                session, b, multi_conv_id, user_text, market_context_block, recaps,
             )
 
     # asyncio queue to merge all SSE events
@@ -266,6 +414,12 @@ async def orchestrate(
                 else:
                     responses.append((b, sub.content, sub.error_msg))
         await _run_summary_stream(user_text, responses, multi_conv_id, queue)
+
+        # Trigger per-blogger recap generation (async, non-blocking)
+        for b in bloggers:
+            asyncio.create_task(
+                _generate_multi_recap_for_blogger(multi_conv_id, b.slug)
+            )
 
         # Final sentinel
         await queue.put(sentinel)
