@@ -17,6 +17,7 @@ from pydantic import Field
 
 from .config import settings
 from .market_data import get_market_context as _get_market_context
+from .mcp_stats import track_tool
 from .stock_data import (
     get_dividend_history as _get_dividend_history,
     get_stock_snapshot as _get_stock_snapshot,
@@ -46,6 +47,7 @@ mcp = FastMCP(
 
 
 @mcp.tool()
+@track_tool("market", "get_market_context")
 def get_market_context(
     topics: Annotated[
         list[str],
@@ -70,6 +72,7 @@ def get_market_context(
 
 
 @mcp.tool()
+@track_tool("market", "get_stock_snapshot")
 def get_stock_snapshot(
     query: Annotated[
         str,
@@ -98,6 +101,7 @@ def get_stock_snapshot(
 
 
 @mcp.tool()
+@track_tool("market", "get_dividend_history")
 def get_dividend_history(
     query: Annotated[
         str,
@@ -170,6 +174,7 @@ def get_dividend_history(
 
 
 @mcp.tool()
+@track_tool("market", "web_search")
 def web_search(
     query: Annotated[
         str,

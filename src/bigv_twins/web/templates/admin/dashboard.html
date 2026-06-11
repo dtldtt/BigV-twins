@@ -419,6 +419,152 @@
   </article>
 </div>
 
+<!-- MCP 服务状态 -->
+<article style="margin-top:1.5rem">
+  <header>
+    <strong>🔌 MCP 服务状态</strong>
+    <small class="muted" style="margin-left:0.6rem">实时监控系统级 MCP 服务</small>
+  </header>
+
+  <div class="grid" style="margin-top:0.8rem">
+    {% for svc in mcp_status %}
+    <article class="mcp-card">
+      <div class="mcp-header">
+        <span class="mcp-status-dot {% if svc.active and svc.port_listening %}status-ok{% else %}status-error{% endif %}"></span>
+        <strong>{{ svc.name }}</strong>
+        <small class="muted">:{{ svc.port }}</small>
+      </div>
+      <div class="mcp-desc">{{ svc.desc }}</div>
+
+      <div class="mcp-stats">
+        <div>
+          <span class="mcp-label">状态</span>
+          <span class="mcp-value {% if svc.active %}text-ok{% else %}text-error{% endif %}">
+            {{ '运行中' if svc.active else '已停止' }}
+          </span>
+        </div>
+        <div>
+          <span class="mcp-label">端口</span>
+          <span class="mcp-value {% if svc.port_listening %}text-ok{% else %}text-error{% endif %}">
+            {{ '监听中' if svc.port_listening else '未监听' }}
+          </span>
+        </div>
+        {% if svc.uptime %}
+        <div>
+          <span class="mcp-label">运行时间</span>
+          <span class="mcp-value">
+            {% set h = svc.uptime // 3600 %}
+            {% set m = (svc.uptime % 3600) // 60 %}
+            {% if h > 24 %}
+              {{ h // 24 }}天 {{ h % 24 }}小时
+            {% elif h > 0 %}
+              {{ h }}小时 {{ m }}分钟
+            {% else %}
+              {{ m }}分钟
+            {% endif %}
+          </span>
+        </div>
+        {% endif %}
+        <div>
+          <span class="mcp-label">重启次数</span>
+          <span class="mcp-value">{{ svc.restart_count }}</span>
+        </div>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+
+  <!-- MCP 工具调用统计 -->
+  {% if mcp_tool_stats %}
+  <div style="margin-top:1rem; border-top:1px solid #eee; padding-top:1rem">
+    <strong>📊 工具调用统计</strong>
+    <small class="muted" style="margin-left:0.6rem">各 MCP 工具的调用次数和最近调用时间</small>
+
+    <table style="margin-top:0.8rem; font-size:0.85rem">
+      <thead>
+        <tr>
+          <th>服务</th>
+          <th>工具</th>
+          <th style="text-align:right">调用次数</th>
+          <th>最近调用</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for server_name, server_data in mcp_tool_stats.items() %}
+          {% for tool_name, tool_data in server_data.tools.items() %}
+          <tr>
+            {% if loop.first %}
+            <td rowspan="{{ server_data.tools|length }}" style="vertical-align:top; font-weight:600">
+              {{ server_name }}
+            </td>
+            {% endif %}
+            <td><code>{{ tool_name }}</code></td>
+            <td style="text-align:right; font-weight:600">{{ tool_data.count }}</td>
+            <td style="color:#666; font-size:0.8rem">
+              {% if tool_data.last_called_at %}
+                {{ tool_data.last_called_at[:16]|replace('T', ' ') }}
+              {% else %}
+                —
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</article>
+
+<style>
+.mcp-card {
+  border: 1px solid #e0e3ed;
+  border-radius: 8px;
+  padding: 1rem;
+}
+.mcp-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+.mcp-status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.mcp-status-dot.status-ok {
+  background: #4caf50;
+  box-shadow: 0 0 8px rgba(76, 175, 80, 0.5);
+}
+.mcp-status-dot.status-error {
+  background: #f44336;
+  box-shadow: 0 0 8px rgba(244, 67, 54, 0.5);
+}
+.mcp-desc {
+  font-size: 0.85rem;
+  color: #666;
+  margin-bottom: 0.8rem;
+}
+.mcp-stats {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 0.5rem;
+  font-size: 0.85rem;
+}
+.mcp-label {
+  color: #888;
+  display: block;
+}
+.mcp-value {
+  font-weight: 600;
+  color: #333;
+}
+.text-ok { color: #2e7d32; }
+.text-error { color: #c62828; }
+</style>
+
 
 
 <article style="margin-top:1.5rem; text-align:center; padding:1.5rem">

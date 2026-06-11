@@ -20,6 +20,7 @@ from pydantic import Field
 from .archive_url import to_archive_url
 from .chunk import html_to_text
 from .config import BLOGGERS, BY_SLUG, settings
+from .mcp_stats import track_tool
 from .search import search as _search
 
 
@@ -75,6 +76,7 @@ def _validate_blogger(slug: str) -> None:
 
 
 @mcp.tool()
+@track_tool("blogger", "list_bloggers")
 def list_bloggers() -> list[dict]:
     """List every blogger BigV-twins knows about, with metadata and persona availability."""
     out: list[dict] = []
@@ -109,6 +111,7 @@ def list_bloggers() -> list[dict]:
 
 
 @mcp.tool()
+@track_tool("blogger", "search")
 def search(
     blogger: Annotated[str, Field(description="Blogger slug; see list_bloggers.")],
     query: Annotated[str, Field(description="Natural-language Chinese query.")],
@@ -148,6 +151,7 @@ def search(
 
 
 @mcp.tool()
+@track_tool("blogger", "search_multi_query")
 def search_multi_query(
     blogger: Annotated[str, Field(description="Blogger slug.")],
     queries: Annotated[
@@ -201,6 +205,7 @@ def search_multi_query(
 
 
 @mcp.tool()
+@track_tool("blogger", "get_recent")
 def get_recent(
     blogger: Annotated[str, Field(description="Blogger slug.")],
     n: Annotated[int, Field(ge=1, le=50)] = 10,
@@ -242,6 +247,7 @@ def get_recent(
 
 
 @mcp.tool()
+@track_tool("blogger", "get_post")
 def get_post(
     blogger: Annotated[str, Field(description="Blogger slug.")],
     zhihu_id: Annotated[str, Field(description="zhihu_id from search() or get_recent().")],
@@ -277,6 +283,7 @@ def get_post(
 
 
 @mcp.tool()
+@track_tool("blogger", "get_persona")
 def get_persona(
     blogger: Annotated[str, Field(description="Blogger slug.")],
 ) -> dict:

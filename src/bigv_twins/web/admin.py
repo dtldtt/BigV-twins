@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Annotated
@@ -19,6 +21,96 @@ from .db import BloggerOverride, Conversation, Message, User
 
 router = APIRouter(prefix="/admin")
 templates = Jinja2Templates(directory=str(Path(__file__).parent / "templates"))
+
+
+# ------------------------------------------------------------ MCP status helpers
+
+def _get_systemd_status(unit_name: str) -> dict:
+    """Query systemd for a service's status. Returns dict with status fields."""
+    info = {
+        "unit": unit_name,
+        "active": False,
+        "status": "unknown",
+        "pid": None,
+        "uptime": None,
+        "last_restart": None,
+        "restart_count": 0,
+    }
+    try:
+        # Check if service is active
+        result = subprocess.run(
+            ["systemctl", "--user", "is-active", unit_name],
+            capture_output=True, text=True, timeout=5
+        )
+        info["status"] = result.stdout.strip()
+        info["active"] = (result.returncode == 0)
+
+        if info["active"]:
+            # Get PID and uptime
+            show_result = subprocess.run(
+                ["systemctl", "--user", "show", unit_name,
+                 "--property=MainPID,ActiveEnterTimestamp,NRestarts"],
+                capture_output=True, text=True, timeout=5
+            )
+            for line in show_result.stdout.splitlines():
+                if line.startswith("MainPID="):
+                    info["pid"] = int(line.split("=")[1])
+                elif line.startswith("ActiveEnterTimestamp="):
+                    ts_str = line.split("=", 1)[1]
+                    if ts_str:
+                        # Parse systemd timestamp
+                        try:
+                            dt = datetime.strptime(ts_str[:19], "%Y-%m-%d %H:%M:%S")
+                            info["last_restart"] = dt.isoformat()
+                            info["uptime"] = int((datetime.now() - dt).total_seconds())
+                        except ValueError:
+                            pass
+                elif line.startswith("NRestarts="):
+                    info["restart_count"] = int(line.split("=")[1])
+    except Exception as e:
+        info["error"] = str(e)
+    return info
+
+
+def _check_port_listening(port: int) -> bool:
+    """Check if a TCP port is listening."""
+    try:
+        result = subprocess.run(
+            ["ss", "-tlnp"],
+            capture_output=True, text=True, timeout=5
+        )
+        return f":{port} " in result.stdout
+    except Exception:
+        return False
+
+
+def _get_mcp_status() -> list[dict]:
+    """Get status of all MCP services."""
+    services = [
+        {"name": "blogger", "unit": "bigv-twins-blogger.service", "port": 8770, "desc": "博主语料检索"},
+        {"name": "market", "unit": "bigv-twins-market.service", "port": 8771, "desc": "行情数据"},
+    ]
+    result = []
+    for svc in services:
+        status = _get_systemd_status(svc["unit"])
+        status["name"] = svc["name"]
+        status["port"] = svc["port"]
+        status["desc"] = svc["desc"]
+        status["port_listening"] = _check_port_listening(svc["port"])
+        result.append(status)
+    return result
+
+
+def _get_mcp_tool_stats() -> dict:
+    """Load MCP tool call statistics from the shared JSON file."""
+    import json
+    stats_path = Path("/home/dtl/projects/BigV-twins/data/mcp_stats.json")
+    if not stats_path.exists():
+        return {}
+    try:
+        return json.loads(stats_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
 
 
 # ------------------------------------------------------------ dashboard
@@ -44,6 +136,11 @@ async def dashboard(
     hidden_slugs = {r[0] for r in (await session.execute(
         select(BloggerOverride.slug).where(BloggerOverride.hidden.is_(True))
     )).all()}
+
+    # MCP status
+    mcp_status = _get_mcp_status()
+    mcp_tool_stats = _get_mcp_tool_stats()
+
     return templates.TemplateResponse(
         request=request, name="admin/dashboard.html",
         context={
@@ -54,6 +151,8 @@ async def dashboard(
             "active_invite": active,
             "hidden_count": len(hidden_slugs),
             "blogger_total": len(BLOGGERS),
+            "mcp_status": mcp_status,
+            "mcp_tool_stats": mcp_tool_stats,
         },
     )
 
