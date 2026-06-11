@@ -1,0 +1,9 @@
+[Unit]
+Description=BigV-twins MCP health check timer
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target

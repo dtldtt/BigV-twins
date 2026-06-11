@@ -1,0 +1,11 @@
+[Unit]
+Description=Run BigV-twins incremental index daily
+
+[Timer]
+OnCalendar=*-*-* 03:17:00
+Persistent=true
+RandomizedDelaySec=10min
+Unit=bigv-twins-daily.service
+
+[Install]
+WantedBy=timers.target

@@ -46,6 +46,8 @@
 - [33. Qoder SDK Token 监控](#33-qoder-sdk-token-监控)
 - [34. 趋势追踪（/report/trends）](#34-趋势追踪reporttrends)
 - [35. AI 投顾股息率判断框架](#35-ai-投顾股息率判断框架)
+- [36. 对话 Recap 机制（长对话优化）](#36-对话-recap-机制长对话优化)
+- [37. MCP 服务监控与 Systemd 加固](#37-mcp-服务监控与-systemd-加固)
 
 ---
 
@@ -2217,6 +2219,120 @@ Python 代码通过 `prompt_loader.load_prompt("chat/advisor.md", blogger_slug="
 - **大市值白马蓝筹**：千亿级市值 + 行业垄断 + 盈利稳定，同样 ≥ 5% 有吸引力
 - **中小公司 / 分红不稳定**：即使高股息也提示风险
 - **等待档位计算**：自动算出 5.5% 和 6.0% 对应的买入价
+
+---
+
+## 36. 对话 Recap 机制（长对话优化）
+
+> v0.7.1+ 新增，解决长对话导致 LLM 无响应的问题。
+
+**问题**：对话消息数 > 8 条时，OpenClaw 的 agent loop 会用英文 markers 包装历史，导致 qwen3.6-flash 切换英文思维，犹豫不决返回空响应。
+
+**方案**：阈值触发异步 recap 生成，用摘要 + 最近 3 轮对话替代完整历史。
+
+### 触发条件
+
+- **首次生成**：对话消息数 ≥ 8 条
+- **更新频率**：之后每增加 6 条消息更新一次
+- **生成时机**：每次 assistant 回答完成后，后台异步生成（不阻塞用户）
+
+### 实现细节
+
+**单人对话**（`conversations` 表）：
+- `recap` TEXT：摘要内容（~500 字）
+- `recap_msg_count` INTEGER：生成时的消息数
+- `recap_updated_at` DATETIME：最后更新时间
+
+**多人对话**（`multi_conversations` 表）：
+- `per_blogger_recaps` TEXT：JSON 格式，每个博主独立的 recap
+- 结构：`{"slug": {"recap": "...", "msg_count": 8, "updated_at": "..."}}`
+- 保持博主视角隔离（sanren 的 recap 只包含 sanren 和用户的交互）
+
+### 使用方式
+
+下次用户发消息时，`chat.py` / `multi_orchestrator.py` 自动判断：
+```
+if 有 recap 且 recap 足够新:
+    messages = [system, recap_block, 最近 3 轮, 当前问题]
+elif 消息数 >= 20 但没有 recap:
+    messages = [system, 最近 6 轮, 当前问题]  # fallback 强制截断
+else:
+    messages = [system, 完整历史, 当前问题]
+```
+
+### 为什么用 Qoder SDK 而不是 OpenClaw？
+
+OpenClaw 的 `/v1/chat/completions` 走完整 agent loop，会自动加 ~18K tokens 的 agent 系统上下文。这个系统 prompt 会和 `recap.md` 的指令冲突，导致 LLM 误解任务（把"生成摘要"当成"回答用户问题"）。Qoder SDK 没有这个问题。
+
+---
+
+## 37. MCP 服务监控与 Systemd 加固
+
+> v0.7.1+ 新增，解决 MCP 服务挂掉无人知晓的问题。
+
+**背景**：`bigv-twins-blogger.service` 停了 15 天没人发现，`bigv-twins-market.service` crash loop 2400 次。根因是 systemd 配置太简单 + 没有监控。
+
+### 三层加固
+
+**第一层：立即修复**
+- 杀掉占用端口的孤儿进程
+- 重启 blogger / market 两个服务
+
+**第二层：Systemd 配置加固**（`deploy/systemd/` 目录）
+
+```ini
+# 启动前清理端口占用（杀掉残留进程）
+ExecStartPre=-/usr/bin/fuser -k 8770/tcp
+
+# 重启上限：5 分钟内最多重启 5 次，超过就停
+StartLimitIntervalSec=300
+StartLimitBurst=5
+```
+
+**第三层：Healthcheck Timer**（每 5 分钟检查）
+
+`bigv-twins-healthcheck.timer` + `bigv-twins-healthcheck.service`：
+- 检查 8770 / 8771 端口是否在监听
+- 如果不在，自动重启对应服务
+- 记录日志到 syslog（tag: `bigv-healthcheck`）
+
+### Admin Dashboard 监控
+
+`/admin` 页面新增 MCP 状态面板：
+
+**服务状态卡片**：
+- 状态（运行中 / 已停止）+ 绿/红指示灯
+- 端口状态（监听中 / 未监听）
+- 运行时间（天/小时/分钟）
+- 重启次数
+
+**工具调用统计表格**：
+- 每个 MCP 工具的调用次数
+- 最近调用时间
+- 按服务分组（blogger / market）
+
+### 工具调用追踪
+
+`mcp_stats.py` 模块提供 `@track_tool` 装饰器：
+```python
+@mcp.tool()
+@track_tool("market", "get_dividend_history")
+def get_dividend_history(query, last_n=10):
+    ...
+```
+
+每次调用自动写入 `data/mcp_stats.json`，admin dashboard 读取展示。
+
+### Systemd 文件存放
+
+所有 service / timer 文件存放在 `deploy/systemd/` 目录，方便迁移：
+- `bigv-twins-blogger.service` — 博主语料 MCP（8770）
+- `bigv-twins-market.service` — 行情数据 MCP（8771）
+- `bigv-twins-web.service` — FastAPI Web UI（8001）
+- `bigv-twins-daily.service` + `.timer` — 每日 embedding 增量索引
+- `bigv-twins-healthcheck.service` + `.timer` — MCP 健康检查
+
+部署时复制到 `~/.config/systemd/user/` 并 `systemctl --user enable --now`。
 
 ---
 

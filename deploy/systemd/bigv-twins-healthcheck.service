@@ -1,0 +1,14 @@
+[Unit]
+Description=BigV-twins MCP health check
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c '\
+  for port in 8770 8771; do \
+    if ! ss -tlnp | grep -q ":$port "; then \
+      logger -t bigv-healthcheck "MCP port $port not listening, restarting"; \
+      systemctl --user restart bigv-twins-blogger 2>/dev/null || true; \
+      systemctl --user restart bigv-twins-market 2>/dev/null || true; \
+    fi; \
+  done \
+'

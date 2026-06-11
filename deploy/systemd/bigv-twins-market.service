@@ -1,0 +1,19 @@
+[Unit]
+Description=BigV-twins MARKET MCP server (stock snapshot + market context)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/dtl/projects/BigV-twins
+ExecStartPre=-/usr/bin/fuser -k 8771/tcp
+ExecStart=/home/dtl/miniconda3/envs/bigv-twins/bin/python -m bigv_twins.market_server
+Restart=on-failure
+RestartSec=5s
+StartLimitIntervalSec=300
+StartLimitBurst=5
+StandardOutput=append:/home/dtl/projects/BigV-twins/logs/mcp_market.log
+StandardError=append:/home/dtl/projects/BigV-twins/logs/mcp_market.log
+
+[Install]
+WantedBy=default.target
